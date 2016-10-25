@@ -27,7 +27,7 @@ as
 
     for x in generator loop
       l_ret_var.person_num_pk := x.rownum;
-      l_ret_var.person_char_pk := null;
+      l_ret_var.person_char_pk := sys_guid();
       l_ret_var.person_cdate := sysdate;
       l_ret_var.country_short := 'US';
       l_ret_var.gender := person_random.r_gender;
@@ -78,7 +78,7 @@ as
 
     for x in generator loop
       l_ret_var.user_num_pk := x.rownum;
-      l_ret_var.user_char_pk := null;
+      l_ret_var.user_char_pk := sys_guid();
       l_ret_var.user_cdate := sysdate;
       l_ret_var.username := person_random.r_name;
       l_ret_var.email := web_random.r_email;
@@ -130,7 +130,7 @@ as
 
     for x in generator loop
       l_ret_var.cdr_num_pk := x.rownum;
-      l_ret_var.cdr_char_pk := null;
+      l_ret_var.cdr_char_pk := sys_guid();
       l_ret_var.cdr_cdate := sysdate;
       l_ret_var.orig_imsi := phone_random.r_imsi('AU');
       l_ret_var.orig_isdn := phone_random.r_phonenumber('AU',true);
@@ -185,7 +185,7 @@ as
 
     for x in generator loop
       l_ret_var.news_article_num_pk := x.rownum;
-      l_ret_var.news_article_char_pk := null;
+      l_ret_var.news_article_char_pk := sys_guid();
       l_ret_var.news_article_cdate := sysdate;
       l_ret_var.author := person_random.r_name;
       l_ret_var.written := time_random.r_date;

@@ -66,17 +66,25 @@ as
   type cdr_tab is table of cdr_rec;
   -- News articles
   type news_article_rec is record (
-    news_article_num_pk     number
-    , news_article_char_pk  varchar2(50)
-    , news_article_cdate    date
-    , author                varchar2(300)
-    , written               date
-    , headline              varchar2(250)
-    , lead_paragraph        varchar2(1000)
-    , main_article          clob
-    , end_paragraph         varchar2(1000)
+    news_article_num_pk       number
+    , news_article_char_pk    varchar2(50)
+    , news_article_cdate      date
+    , author                  varchar2(300)
+    , written                 date
+    , headline                varchar2(250)
+    , lead_paragraph          varchar2(1000)
+    , main_article            clob
+    , end_paragraph           varchar2(1000)
   );
   type news_article_tab is table of news_article_rec;
+  -- Credit card transactions
+  /* type cc_transaction_rec is record (
+    cc_transaction_num_pk     number
+    , cc_transaction_char_pk  varchar2(50)
+    , cc_transaction_cdate    date
+    , transaction_date        timestamp
+    , transaction_type
+  ) */
 
   -- Generators
   /** People generator.
