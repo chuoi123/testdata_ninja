@@ -41,6 +41,7 @@ as
     , creditcard            varchar2(50)
     , creditcard_num        number
     , creditcard_expiry     varchar2(10)
+    , password              varchar2(50)
   );
   type user_tab is table of user_rec;
   -- Mobile CDR

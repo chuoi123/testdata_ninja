@@ -89,6 +89,7 @@ as
       l_ret_var.creditcard := finance_random.r_creditcard;
       l_ret_var.creditcard_num := finance_random.r_creditcardnum(l_ret_var.creditcard);
       l_ret_var.creditcard_expiry := finance_random.r_expirydate;
+      l_ret_var.password := core_random.r_hex(45);
       pipe row(l_ret_var);
 
       l_ret_var := null;
