@@ -200,8 +200,8 @@ as
 
     if l_country is null then
       l_country := 'US';
-    -- elsif not demograhics_data.c_d_arr.exists(l_country) then
-    --  l_country := 'US';
+    elsif not demograhics_data.c_d_arr.exists(l_country) then
+      l_country := 'US';
     end if;
 
     -- Calculate proportions of people.
@@ -225,13 +225,13 @@ as
       l_ret_var.person_cdate := sysdate;
       l_ret_var.country_short := l_country;
       l_ret_var.gender := l_gender;
-      l_ret_var.identification := person_random.r_identification(l_country);
+      l_ret_var.birthdate := person_random.r_birthday(null, false, 0, 14);
+      l_ret_var.identification := person_random.r_identification(l_country, l_gender, l_ret_var.birthdate);
       l_ret_var.first_name := person_random.r_firstname(l_country, l_gender);
       if core_random.r_bool then
         l_ret_var.middle_name := person_random.r_middlename(l_country, l_gender);
       end if;
       l_ret_var.last_name := person_random.r_lastname(l_country, l_gender);
-      l_ret_var.birthdate := person_random.r_birthday(null, false, 0, 14);
       pipe row(l_ret_var);
 
       l_ret_var := null;
@@ -249,13 +249,13 @@ as
       l_ret_var.person_cdate := sysdate;
       l_ret_var.country_short := l_country;
       l_ret_var.gender := l_gender;
-      l_ret_var.identification := person_random.r_identification(l_country);
+      l_ret_var.birthdate := person_random.r_birthday(null, false, 15, 64);
+      l_ret_var.identification := person_random.r_identification(l_country, l_gender, l_ret_var.birthdate);
       l_ret_var.first_name := person_random.r_firstname(l_country, l_gender);
       if core_random.r_bool then
         l_ret_var.middle_name := person_random.r_middlename(l_country, l_gender);
       end if;
       l_ret_var.last_name := person_random.r_lastname(l_country, l_gender);
-      l_ret_var.birthdate := person_random.r_birthday(null, false, 15, 64);
       pipe row(l_ret_var);
 
       l_ret_var := null;
@@ -273,13 +273,13 @@ as
       l_ret_var.person_cdate := sysdate;
       l_ret_var.country_short := l_country;
       l_ret_var.gender := l_gender;
-      l_ret_var.identification := person_random.r_identification(l_country);
+      l_ret_var.birthdate := person_random.r_birthday(null, false, 65, 99);
+      l_ret_var.identification := person_random.r_identification(l_country, l_gender, l_ret_var.birthdate);
       l_ret_var.first_name := person_random.r_firstname(l_country, l_gender);
       if core_random.r_bool then
         l_ret_var.middle_name := person_random.r_middlename(l_country, l_gender);
       end if;
       l_ret_var.last_name := person_random.r_lastname(l_country, l_gender);
-      l_ret_var.birthdate := person_random.r_birthday(null, false, 65, 99);
       pipe row(l_ret_var);
 
       l_ret_var := null;
