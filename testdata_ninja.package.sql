@@ -11,6 +11,7 @@ as
 
   -- Globals
   g_default_generator_rows        number := 10;
+  g_default_population_size       number := 0.001;
 
   -- Records and types.
   -- People
@@ -78,13 +79,16 @@ as
   );
   type news_article_tab is table of news_article_rec;
   -- Credit card transactions
-  /* type cc_transaction_rec is record (
+  type cc_transaction_rec is record (
     cc_transaction_num_pk     number
     , cc_transaction_char_pk  varchar2(50)
     , cc_transaction_cdate    date
+    , creditcard_num          varchar2(100)
     , transaction_date        timestamp
-    , transaction_type
-  ) */
+    , transaction_type        varchar2(100)
+    , transaction_amount      number
+  );
+  type cc_transaction_tab is table of cc_transaction_rec;
 
   -- Generators
   /** People generator.
@@ -93,6 +97,18 @@ as
   */
   function people (
     generator_count         number default g_default_generator_rows
+  )
+  return person_tab
+  pipelined;
+
+  /** Population generator. Instead of just producing a list of random people,
+  * this generator produces demogrphically correct data sets.
+  * @author Morten Egan
+  * @return person_tab The list of people generated.
+  */
+  function population (
+    country                 varchar2 default null
+    , generator_count       number default g_default_population_size
   )
   return person_tab
   pipelined;
@@ -126,6 +142,26 @@ as
   )
   return news_article_tab
   pipelined;
+
+  /** Credit card transactions generator.
+  * @author Morten Egan
+  * @return cc_transaction_tab The list of credit card transactions.
+  */
+  function creditcardtransactions (
+    generator_count         number default g_default_generator_rows
+  )
+  return cc_transaction_tab
+  pipelined;
+
+  /** Procedure to create custom generators.
+  * @author Morten Egan
+  * @param generator_name The name of the generator.
+  * @param generator_format The format of the generator.
+  */
+  procedure generator_create (
+    generator_name              in        varchar2
+    , generator_format          in        varchar2
+  );
 
 end testdata_ninja;
 /
