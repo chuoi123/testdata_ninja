@@ -2,6 +2,93 @@ create or replace package body testdata_ninja
 
 as
 
+  function parse_generator_cols (
+    column_metadata             in        varchar2
+  )
+  return generator_columns
+
+  as
+
+    l_ret_var               generator_columns := generator_columns();
+    l_ret_idx               number;
+    l_column_count          number := regexp_count(column_metadata, '@') + 1;
+    l_tmp_column            varchar2(4000);
+    l_tmp_reference         varchar2(4000);
+
+  begin
+
+    dbms_application_info.set_action('parse_generator_cols');
+
+    for i in 1..l_column_count loop
+      l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
+      l_ret_var.extend(1);
+      l_ret_idx := l_ret_var.count;
+      -- Set the basics
+      l_ret_var(l_ret_idx).column_name := util_random.ru_extract(l_tmp_column, 1, '#');
+      l_ret_var(l_ret_idx).data_type := util_random.ru_extract(l_tmp_column, 2, '#');
+      -- Check generator type.
+      if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '£' then
+        -- This is a reference field.
+        l_ret_var(l_ret_idx).column_type := 'reference field';
+        l_tmp_reference := util_random.ru_extract(l_tmp_column, 3, '#');
+        l_ret_var(l_ret_idx).reference_table := substr(util_random.ru_extract(l_tmp_reference, 1, '¤'), 2);
+        l_ret_var(l_ret_idx).reference_column := util_random.ru_extract(l_tmp_reference, 2, '¤');
+        l_ret_var(l_ret_idx).ref_dist_type := util_random.ru_extract(l_tmp_reference, 3, '¤');
+        if length(util_random.ru_extract(l_tmp_reference, 4, '¤')) != length(l_tmp_reference) then
+          l_ret_var(l_ret_idx).ref_dist_default := util_random.ru_extract(l_tmp_reference, 4, '¤');
+        end if;
+        -- Build the definition code for the reference field.
+        l_ret_var(l_ret_idx).ref_define_code := '
+          type t_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_c_tab is table of number index by varchar2(4000);
+          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list t_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_c_tab;
+          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx varchar2(4000);
+          l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := round(generator_count/dist_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||');
+          cursor c_ref_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||'(dist_in number) is
+            select ' || l_ret_var(l_ret_idx).reference_column || ' as ref_dist_col
+            from (
+              select ' || l_ret_var(l_ret_idx).reference_column || '
+              from ' || l_ret_var(l_ret_idx).reference_table || '
+              order by dbms_random.value
+            )
+            where rownum <= dist_in;
+        ';
+        -- Now we build the loading of the reference data code.
+        l_ret_var(l_ret_idx).ref_loader_code := '
+          -- Load reference data cursors to lists
+          for i in c_ref_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ') loop
+            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := dist_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||';
+          end loop;
+          -- Set the index
+          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list.first;
+        ';
+        -- Now we build the logic of reference values
+        l_ret_var(l_ret_idx).ref_logic_code := '
+          l_ret_var.' || l_ret_var(l_ret_idx).column_name || ' := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx;
+          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx) := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx) - 1;
+          if l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx) = 0 then
+            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list.next(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx);
+          end if;
+        ';
+      else
+        l_ret_var(l_ret_idx).column_type := 'generated';
+        l_ret_var(l_ret_idx).generator := util_random.ru_extract(l_tmp_column, 3, '#');
+        if length(util_random.ru_extract(l_tmp_column, 4, '#')) != length(l_tmp_column) then
+          l_ret_var(l_ret_idx).generator_args := util_random.ru_extract(l_tmp_column, 4, '#');
+        end if;
+      end if;
+    end loop;
+
+    dbms_application_info.set_action(null);
+
+    return l_ret_var;
+
+    exception
+      when others then
+        dbms_application_info.set_action(null);
+        raise;
+
+  end parse_generator_cols;
+
   procedure generator_create (
     generator_name              in        varchar2
     , generator_format          in        varchar2
@@ -9,16 +96,26 @@ as
 
   as
 
+    -- old structure vars.
     l_generator_pkg_head        varchar2(32000);
     l_generator_pkg_body        varchar2(32000);
     l_format_elements           number;
     l_format_element            varchar2(500);
+    l_generator_elements        varchar2(1000);
+    l_generator_distribution    number;
+    l_key_generators            varchar2(2000);
+    l_have_ref_generator        boolean := false;
+    l_generator_inp_name        varchar2(30);
+    l_generator_inp_val         varchar2(30);
+
+    -- New structure vars, remove old as they are replaced.
+    l_generator_columns         generator_columns;
 
   begin
 
     dbms_application_info.set_action('generator_create');
 
-    l_format_elements := regexp_count(generator_format, '@') + 1;
+    l_generator_columns := parse_generator_cols(generator_format);
 
     l_generator_pkg_head := 'create or replace package tdg_'|| generator_name ||'
       as
@@ -27,12 +124,11 @@ as
         type '|| generator_name ||'_rec is record (
         ';
 
-        for i in 1..l_format_elements loop
-          l_format_element := util_random.ru_extract(generator_format, i, '@');
+        for i in 1..l_generator_columns.count loop
           if i = 1 then
-            l_generator_pkg_head := l_generator_pkg_head || util_random.ru_extract(l_format_element, 1, '#') || ' ' || util_random.ru_extract(l_format_element, 2, '#');
+            l_generator_pkg_head := l_generator_pkg_head || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
           else
-            l_generator_pkg_head := l_generator_pkg_head || ', ' || util_random.ru_extract(l_format_element, 1, '#') || ' ' || util_random.ru_extract(l_format_element, 2, '#');
+            l_generator_pkg_head := l_generator_pkg_head || ', ' || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
           end if;
         end loop;
 
@@ -41,22 +137,38 @@ as
         type '|| generator_name ||'_tab is table of '|| generator_name ||'_rec;
 
         function '|| generator_name ||' (
-          generator_count         number default g_default_generator_rows
+          generator_count         number default g_default_generator_rows';
+
+    for i in 1..l_generator_columns.count loop
+      if l_generator_columns(i).column_type = 'reference field' then
+        l_generator_pkg_head := l_generator_pkg_head || '
+          , dist_'|| substr(l_generator_columns(i).column_name, 1, 15) ||'   number default ' || l_generator_columns(i).ref_dist_default;
+      end if;
+    end loop;
+
+    l_generator_pkg_head := l_generator_pkg_head || '
         )
         return '|| generator_name ||'_tab
         pipelined;
 
       end tdg_'|| generator_name ||';';
 
-      dbms_output.put_line(l_generator_pkg_head);
-
-      execute immediate l_generator_pkg_head;
+    execute immediate l_generator_pkg_head;
 
     l_generator_pkg_body := 'create or replace package body tdg_'|| generator_name ||'
       as
 
         function '|| generator_name ||' (
-          generator_count         number default g_default_generator_rows
+          generator_count         number default g_default_generator_rows';
+
+    for i in 1..l_generator_columns.count loop
+      if l_generator_columns(i).column_type = 'reference field' then
+        l_generator_pkg_body := l_generator_pkg_body || '
+          , dist_'|| substr(l_generator_columns(i).column_name, 1, 15) ||'   number default ' || l_generator_columns(i).ref_dist_default;
+      end if;
+    end loop;
+
+    l_generator_pkg_body := l_generator_pkg_body || '
         )
         return '|| generator_name ||'_tab
         pipelined
@@ -65,6 +177,15 @@ as
 
           l_ret_var       '|| generator_name ||'_rec;
 
+          -- Generators';
+
+    for i in 1..l_generator_columns.count loop
+      if l_generator_columns(i).column_type = 'reference field' then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_define_code;
+      end if;
+    end loop;
+
+    l_generator_pkg_body := l_generator_pkg_body || '
           cursor generator is
             select --+ materialize
               rownum
@@ -74,14 +195,26 @@ as
               level <= generator_count;
 
         begin
+    ';
 
-          for x in generator loop
-      ';
+    for i in 1..l_generator_columns.count loop
+      if l_generator_columns(i).column_type = 'reference field' then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_loader_code;
+      end if;
+    end loop;
 
-      for i in 1..l_format_elements loop
-        l_format_element := util_random.ru_extract(generator_format, i, '@');
-        l_generator_pkg_body := l_generator_pkg_body || ' l_ret_var.' || util_random.ru_extract(l_format_element, 1, '#') || ' := ' || util_random.ru_extract(l_format_element, 3, '#') || ';';
-      end loop;
+    l_generator_pkg_body := l_generator_pkg_body || '
+          for x in generator loop';
+
+    for i in 1..l_generator_columns.count loop
+      if l_generator_columns(i).column_type = 'reference field' then
+        -- Referenced field. Run ref logic.
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_logic_code;
+      else
+        l_generator_pkg_body := l_generator_pkg_body || '
+          l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+      end if;
+    end loop;
 
       l_generator_pkg_body := l_generator_pkg_body || '
             pipe row(l_ret_var);
@@ -98,7 +231,6 @@ as
 
     execute immediate l_generator_pkg_body;
 
-
     dbms_application_info.set_action(null);
 
     exception
@@ -107,395 +239,6 @@ as
         raise;
 
   end generator_create;
-
-  function people (
-    generator_count         number default g_default_generator_rows
-  )
-  return person_tab
-  pipelined
-
-  as
-
-    l_ret_var               person_rec;
-
-    cursor generator is
-      select --+ materialize
-        rownum
-      from
-        dual
-      connect by
-        level <= generator_count;
-
-
-  begin
-
-    dbms_application_info.set_action('people');
-
-    for x in generator loop
-      l_ret_var.person_num_pk := x.rownum;
-      l_ret_var.person_char_pk := sys_guid();
-      l_ret_var.person_cdate := sysdate;
-      l_ret_var.country_short := 'US';
-      l_ret_var.gender := person_random.r_gender;
-      l_ret_var.identification := person_random.r_identification;
-      l_ret_var.first_name := person_random.r_firstname(l_ret_var.country_short, l_ret_var.gender);
-      if core_random.r_bool then
-        l_ret_var.middle_name := person_random.r_middlename(l_ret_var.country_short, l_ret_var.gender);
-      end if;
-      l_ret_var.last_name := person_random.r_lastname(l_ret_var.country_short, l_ret_var.gender);
-      l_ret_var.birthdate := person_random.r_birthday;
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    dbms_application_info.set_action(null);
-
-    return;
-
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
-  end people;
-
-  function population (
-    country                 varchar2 default null
-    , generator_count       number default g_default_population_size
-  )
-  return person_tab
-  pipelined
-
-  as
-
-    -- Base variables.
-    l_ret_var               person_rec;
-    l_country               varchar2(10) := country;
-    l_population_size       number;
-
-    -- Demographics variables.
-    l_people_0_14           number;
-    l_people_0_14_m         number;
-    l_people_15_64          number;
-    l_people_15_64_m        number;
-    l_people_65_            number;
-    l_people_65_m           number;
-
-    -- Temporary working variables.
-    l_age                   number;
-    l_gender                varchar2(10);
-
-    cursor generator(n number) is
-      select --+ materialize
-        rownum
-      from
-        dual
-      connect by
-        level <= n;
-
-  begin
-
-    dbms_application_info.set_action('population');
-
-    if l_country is null then
-      l_country := 'US';
-    elsif not demograhics_data.c_d_arr.exists(l_country) then
-      l_country := 'US';
-    end if;
-
-    -- Calculate proportions of people.
-    l_population_size := round(demograhics_data.c_d_arr(l_country).population * generator_count);
-    l_people_0_14 := round((l_population_size/100) * demograhics_data.c_d_arr(l_country).p_0_14);
-    l_people_0_14_m := (l_people_0_14/2) + (l_people_0_14 * (demograhics_data.c_d_arr(l_country).p_0_14_mf - 1));
-    l_people_15_64 := round((l_population_size/100) * demograhics_data.c_d_arr(l_country).p_15_64);
-    l_people_15_64_m := (l_people_15_64/2) + (l_people_15_64 * (demograhics_data.c_d_arr(l_country).p_15_64_mf - 1));
-    l_people_65_ := round((l_population_size/100) * demograhics_data.c_d_arr(l_country).p_65_);
-    l_people_65_m := (l_people_65_/2) + (l_people_65_ * (demograhics_data.c_d_arr(l_country).p_65_mf - 1));
-
-    -- Generate children
-    for x in generator(l_people_0_14) loop
-      if x.rownum <= l_people_0_14_m then
-        l_gender := 'male';
-      else
-        l_gender := 'female';
-      end if;
-      l_ret_var.person_num_pk := x.rownum;
-      l_ret_var.person_char_pk := sys_guid();
-      l_ret_var.person_cdate := sysdate;
-      l_ret_var.country_short := l_country;
-      l_ret_var.gender := l_gender;
-      l_ret_var.birthdate := person_random.r_birthday(null, false, 0, 14);
-      l_ret_var.identification := person_random.r_identification(l_country, l_gender, l_ret_var.birthdate);
-      l_ret_var.first_name := person_random.r_firstname(l_country, l_gender);
-      if core_random.r_bool then
-        l_ret_var.middle_name := person_random.r_middlename(l_country, l_gender);
-      end if;
-      l_ret_var.last_name := person_random.r_lastname(l_country, l_gender);
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    -- Generate adult
-    for x in generator(l_people_15_64) loop
-      if x.rownum <= l_people_15_64_m then
-        l_gender := 'male';
-      else
-        l_gender := 'female';
-      end if;
-      l_ret_var.person_num_pk := x.rownum;
-      l_ret_var.person_char_pk := sys_guid();
-      l_ret_var.person_cdate := sysdate;
-      l_ret_var.country_short := l_country;
-      l_ret_var.gender := l_gender;
-      l_ret_var.birthdate := person_random.r_birthday(null, false, 15, 64);
-      l_ret_var.identification := person_random.r_identification(l_country, l_gender, l_ret_var.birthdate);
-      l_ret_var.first_name := person_random.r_firstname(l_country, l_gender);
-      if core_random.r_bool then
-        l_ret_var.middle_name := person_random.r_middlename(l_country, l_gender);
-      end if;
-      l_ret_var.last_name := person_random.r_lastname(l_country, l_gender);
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    -- Generate senior.
-    for x in generator(l_people_65_) loop
-      if x.rownum <= l_people_65_m then
-        l_gender := 'male';
-      else
-        l_gender := 'female';
-      end if;
-      l_ret_var.person_num_pk := x.rownum;
-      l_ret_var.person_char_pk := sys_guid();
-      l_ret_var.person_cdate := sysdate;
-      l_ret_var.country_short := l_country;
-      l_ret_var.gender := l_gender;
-      l_ret_var.birthdate := person_random.r_birthday(null, false, 65, 99);
-      l_ret_var.identification := person_random.r_identification(l_country, l_gender, l_ret_var.birthdate);
-      l_ret_var.first_name := person_random.r_firstname(l_country, l_gender);
-      if core_random.r_bool then
-        l_ret_var.middle_name := person_random.r_middlename(l_country, l_gender);
-      end if;
-      l_ret_var.last_name := person_random.r_lastname(l_country, l_gender);
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    dbms_application_info.set_action(null);
-
-    return;
-
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
-  end population;
-
-  function users (
-    generator_count         number default g_default_generator_rows
-  )
-  return user_tab
-  pipelined
-
-  as
-
-    l_ret_var               user_rec;
-
-    cursor generator is
-      select --+ materialize
-        rownum
-      from
-        dual
-      connect by
-        level <= generator_count;
-
-  begin
-
-    dbms_application_info.set_action('users');
-
-    for x in generator loop
-      l_ret_var.user_num_pk := x.rownum;
-      l_ret_var.user_char_pk := sys_guid();
-      l_ret_var.user_cdate := sysdate;
-      l_ret_var.username := person_random.r_name;
-      l_ret_var.email := web_random.r_email;
-      l_ret_var.address1 := location_random.r_address;
-      l_ret_var.address2 := null;
-      l_ret_var.zipcode := location_random.r_zipcode;
-      l_ret_var.state := location_random.r_state;
-      l_ret_var.creditcard := finance_random.r_creditcard;
-      l_ret_var.creditcard_num := finance_random.r_creditcardnum(l_ret_var.creditcard);
-      l_ret_var.creditcard_expiry := finance_random.r_expirydate;
-      l_ret_var.password := core_random.r_hex(45);
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    dbms_application_info.set_action(null);
-
-    return;
-
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
-  end users;
-
-  function cdr (
-    generator_count         number default g_default_generator_rows
-  )
-  return cdr_tab
-  pipelined
-
-  as
-
-    l_ret_var               cdr_rec;
-
-    cursor generator is
-      select --+ materialize
-        rownum
-      from
-        dual
-      connect by
-        level <= generator_count;
-
-  begin
-
-    dbms_application_info.set_action('cdr');
-
-    for x in generator loop
-      l_ret_var.cdr_num_pk := x.rownum;
-      l_ret_var.cdr_char_pk := sys_guid();
-      l_ret_var.cdr_cdate := sysdate;
-      l_ret_var.orig_imsi := phone_random.r_imsi('AU');
-      l_ret_var.orig_isdn := phone_random.r_phonenumber('AU',true);
-      l_ret_var.orig_imei := phone_random.r_imei;
-      l_ret_var.call_type := phone_random.r_call_type;
-      l_ret_var.call_type_service := phone_random.r_call_type_service;
-      l_ret_var.call_start_latitude := location_random.r_latitude;
-      l_ret_var.call_start_longtitude := location_random.r_longtitude;
-      l_ret_var.call_date := time_random.r_timestamp;
-      l_ret_var.call_duration := core_random.r_natural(5,180);
-      l_ret_var.dest_imsi := phone_random.r_imsi('AU');
-      l_ret_var.dest_isdn := phone_random.r_phonenumber('AU',true);
-      l_ret_var.dest_imei := phone_random.r_imei;
-      l_ret_var.network_operator := phone_random.r_operator_code('AU');
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    dbms_application_info.set_action(null);
-
-    return;
-
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
-  end cdr;
-
-  function articles (
-    generator_count         number default g_default_generator_rows
-  )
-  return news_article_tab
-  pipelined
-
-  as
-
-    l_ret_var               news_article_rec;
-
-    cursor generator is
-      select --+ materialize
-        rownum
-      from
-        dual
-      connect by
-        level <= generator_count;
-
-  begin
-
-    dbms_application_info.set_action('articles');
-
-    for x in generator loop
-      l_ret_var.news_article_num_pk := x.rownum;
-      l_ret_var.news_article_char_pk := sys_guid();
-      l_ret_var.news_article_cdate := sysdate;
-      l_ret_var.author := person_random.r_name;
-      l_ret_var.written := time_random.r_date;
-      l_ret_var.headline := text_random.r_sentence(core_random.r_natural(5,15));
-      l_ret_var.lead_paragraph := text_random.r_paragraph;
-      l_ret_var.main_article := text_random.r_paragraph || ' ' || text_random.r_paragraph || ' ' || text_random.r_paragraph || ' ' || text_random.r_paragraph || ' ' || text_random.r_paragraph || ' ' || text_random.r_paragraph;
-      l_ret_var.end_paragraph := text_random.r_paragraph;
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    dbms_application_info.set_action(null);
-
-    return;
-
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
-  end articles;
-
-  function creditcardtransactions (
-    generator_count         number default g_default_generator_rows
-  )
-  return cc_transaction_tab
-  pipelined
-
-  as
-
-    l_ret_var               cc_transaction_rec;
-
-    cursor generator is
-      select --+ materialize
-        rownum
-      from
-        dual
-      connect by
-        level <= generator_count;
-
-  begin
-
-    dbms_application_info.set_action('creditcardtransactions');
-
-    for x in generator loop
-      l_ret_var.cc_transaction_num_pk := x.rownum;
-      l_ret_var.cc_transaction_char_pk := sys_guid();
-      l_ret_var.cc_transaction_cdate := sysdate;
-      l_ret_var.creditcard_num := finance_random.r_creditcardnum;
-      l_ret_var.transaction_date := time_random.r_timebetween(systimestamp - interval '30' day);
-      l_ret_var.transaction_type := finance_random.r_creditcard_tx_type;
-      l_ret_var.transaction_amount := core_random.r_float(2, 5, 2500, 15, 175, 80);
-      pipe row(l_ret_var);
-
-      l_ret_var := null;
-    end loop;
-
-    dbms_application_info.set_action(null);
-
-    return;
-
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
-  end creditcardtransactions;
 
 begin
 
