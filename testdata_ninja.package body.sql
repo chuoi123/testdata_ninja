@@ -14,6 +14,7 @@ as
     l_column_count          number := regexp_count(column_metadata, '@') + 1;
     l_tmp_column            varchar2(4000);
     l_tmp_reference         varchar2(4000);
+    l_reference_replace     number;
 
   begin
 
@@ -42,7 +43,7 @@ as
           type t_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_c_tab is table of number index by varchar2(4000);
           l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list t_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_c_tab;
           l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx varchar2(4000);
-          l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := round(generator_count/dist_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||');
+          l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := round(generator_count/dist_' || substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||');
           cursor c_ref_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||'(dist_in number) is
             select ' || l_ret_var(l_ret_idx).reference_column || ' as ref_dist_col
             from (
@@ -56,7 +57,7 @@ as
         l_ret_var(l_ret_idx).ref_loader_code := '
           -- Load reference data cursors to lists
           for i in c_ref_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ') loop
-            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := dist_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||';
+            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := dist_'|| substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||';
           end loop;
           -- Set the index
           l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list.first;
@@ -74,6 +75,16 @@ as
         l_ret_var(l_ret_idx).generator := util_random.ru_extract(l_tmp_column, 3, '#');
         if length(util_random.ru_extract(l_tmp_column, 4, '#')) != length(l_tmp_column) then
           l_ret_var(l_ret_idx).generator_args := util_random.ru_extract(l_tmp_column, 4, '#');
+          l_reference_replace := instr(l_ret_var(l_ret_idx).generator_args, '%%');
+          while l_reference_replace > 0 loop
+            -- Start replacing backwards reference fields
+            l_ret_var(l_ret_idx).generator_args := substr(l_ret_var(l_ret_idx).generator_args, 1, l_reference_replace -1) || 'l_ret_var.' || substr(l_ret_var(l_ret_idx).generator_args, l_reference_replace + 2);
+            -- Remove end reference field marker
+            l_reference_replace := instr(l_ret_var(l_ret_idx).generator_args, '%%');
+            l_ret_var(l_ret_idx).generator_args := substr(l_ret_var(l_ret_idx).generator_args, 1, l_reference_replace -1) || substr(l_ret_var(l_ret_idx).generator_args, l_reference_replace + 2);
+            -- Get the next marker.
+            l_reference_replace := instr(l_ret_var(l_ret_idx).generator_args, '%%');
+          end loop;
         end if;
       end if;
     end loop;
@@ -96,19 +107,9 @@ as
 
   as
 
-    -- old structure vars.
+    -- Vars
     l_generator_pkg_head        varchar2(32000);
     l_generator_pkg_body        varchar2(32000);
-    l_format_elements           number;
-    l_format_element            varchar2(500);
-    l_generator_elements        varchar2(1000);
-    l_generator_distribution    number;
-    l_key_generators            varchar2(2000);
-    l_have_ref_generator        boolean := false;
-    l_generator_inp_name        varchar2(30);
-    l_generator_inp_val         varchar2(30);
-
-    -- New structure vars, remove old as they are replaced.
     l_generator_columns         generator_columns;
 
   begin
@@ -211,12 +212,18 @@ as
         -- Referenced field. Run ref logic.
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_logic_code;
       else
-        l_generator_pkg_body := l_generator_pkg_body || '
-          l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+        -- Check if we need to add arguments or not
+        if l_generator_columns(i).generator_args is not null then
+          l_generator_pkg_body := l_generator_pkg_body || '
+            l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || ');';
+        else
+          l_generator_pkg_body := l_generator_pkg_body || '
+            l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+        end if;
       end if;
     end loop;
 
-      l_generator_pkg_body := l_generator_pkg_body || '
+    l_generator_pkg_body := l_generator_pkg_body || '
             pipe row(l_ret_var);
             l_ret_var := null;
           end loop;
