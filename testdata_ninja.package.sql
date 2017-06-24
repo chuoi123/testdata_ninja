@@ -19,13 +19,20 @@ as
     , column_type         varchar2(500)
     , generator           varchar2(500)
     , generator_args      varchar2(500)
-    , reference_table     varchar2(500)
+    , reference_table     varchar2(4000)
     , reference_column    varchar2(500)
     , ref_dist_type       varchar2(500)
     , ref_dist_default    varchar2(500)
     , ref_define_code     varchar2(4000)
     , ref_loader_code     varchar2(4000)
     , ref_logic_code      varchar2(4000)
+    , fixed_value         varchar2(4000)
+    , builtin_type        varchar2(100)
+    , builtin_function    varchar2(100)
+    , builtin_startpoint  varchar2(100)
+    , builtin_increment   varchar2(100)
+    , builtin_define_code varchar2(4000)
+    , builtin_logic_code  varchar2(4000)
   );
   type generator_columns is table of generator_column_rec;
 

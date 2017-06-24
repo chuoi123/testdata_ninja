@@ -10,7 +10,7 @@ as
   npg_version         varchar2(250) := '0.0.1';
 
   -- Globals
-  g_default_generator_rows        number := 10;
+  g_default_generator_rows        number := 500;
   g_default_population_size       number := 0.001;
 
   -- Records and types.
