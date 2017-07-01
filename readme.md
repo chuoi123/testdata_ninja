@@ -31,6 +31,17 @@ To install the generator package, simply install the following 2 files:
   - [Data Generator](#data-generator--required)
   - [Input Arguments](#input-arguments--optional)
 - [Generator Format Syntax](#generator-format-syntax)
+  - [JSON Notation Syntax](#json-notation-syntax)
+  - [ASCII Text Notation Syntax](#ascii-text-notation-syntax)
+    - [Column name syntax](#column-name-syntax)
+    - [Data type syntax](#data-type-syntax)
+    - [Data generator syntax](#data-generator-syntax)
+      - [Function data generator](#function-data-generator)
+      - [Incremental data generator](#incremental-data-generator)
+      - [Referential data generator](#referential-data-generator)
+      - [Fixed value data generator](#fixed-value-data-generator)
+    - [Input argument syntax](#input-argument-syntax)
+- [Auto Input Reference](#auto-input-reference)
 
 ### Generator format description
 
