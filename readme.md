@@ -62,10 +62,10 @@ When the data generator is a function, the values for any input parameters can b
 
 ### Generator Format Syntax
 
-##### JSON Notation syntax
+#### JSON Notation syntax
 > This is where the JSON notation will be described.
 
-##### ASCII Text notation syntax
+#### ASCII Text notation syntax
 The ASCII notation style is a very simple clear text notation to describe your generator. The field definitions in the notation are separated by the '#' character. So a column definition would be defined like this:
 
         <column name>#<data type>#<data generator>#<input arguments>
@@ -77,7 +77,7 @@ When you have multiple columns in your generator output, each column definition 
 
 See below sections for a detailed description of each field definition and the syntax.
 
-###### Column name syntax
+##### Column name syntax
 The column name field, has to follow the standard Oracle column syntax and rules. So if your version is less than 12.2 there is a 30 character length restriction or else the column name can be 128 characters long.
 
 **Examples:**
@@ -94,7 +94,7 @@ The column name field, has to follow the standard Oracle column syntax and rules
 
     order_amount#<data type>#<data generator>#<input arguments>
 
-###### Data type syntax
+##### Data type syntax
 The data type field has to be a valid Oracle data type. For any data types that require a length specification, you have to specify that as well. For now only the following data types has been verified as working:
 
 - number
@@ -106,16 +106,59 @@ The data type field has to be a valid Oracle data type. For any data types that 
 
 **Examples:**
 
-*Defining the "ename" column as varchar2(10)*
+*Defining the "ename" column as varchar2(150)*
 
-    ename#varchar2(10)#<data generator>#<input arguments>
+    ename#varchar2(150)#<data generator>#<input arguments>
 
 *Defining the column birth_date as date data type*
 
     birth_date#date#<data generator>#<input arguments>
 
-*Defining the column order_amount as number 16,4*
+*Defining the column order_amount as number*
 
-    order_amount#number(16,4)#<data generator>#<input arguments>
+    order_amount#number#<data generator>#<input arguments>
+
+##### Data generator syntax
+This is the field that actually creates our output data. By default it takes the name of a function that the user has execute privileges on. There are also other built-in special generators that can be used for more specific type of data or referential data, in case you want the output to be child data from an already existing parent table.
+
+###### Function data generator
+This is the most simple type of generator. Simply write the name of the function that will generate the output. The user that creates the test data generator has to have execute privileges on the function for it to work.
+
+**Examples:**
+
+*Generating random text strings as names for the ename column*
+
+    ename#varchar2(150)#dbms_random.string#<input arguments>
+
+*Setting the birth_date column to a value of sysdate*
+
+    birth_date#date#sysdate#<input arguments>
+
+*Setting order_amount column with a random number*
+
+    order_amount#number#dbms_random.value#<input arguments>
+
+###### Incremental data generator
+This data generator is one of the built-in generators. It is used to create either incremental numbers or incremental dates for now. The use case is of course if you need something that can be easily used as a primary key (incremental numbers) or if you are trying to create test data that mimics chronological events (incremental dates).
+
+The format for these generators has a bit more options. They actually have their own fields within the field definition. The way to specify a built-in generator is to use the '^' character as the very first character in the field definition. The syntax for the incremental functions are as below.
+
+*Number incremental function syntax*
+
+    ^numiterate~<start from number>~<increment range start¤increment range end>
+
+The <start from number> and <range of next increment> are not required values. *If you choose not to specify them, the start from number will be 1, and the increment range start will be 1 and increment range end will be 5.* If you choose specify them, they both have to specified and in the correct order.
+
+When you specify the extra options the format has to be followed. So imagine you want to create an incremental number function, that starts with 5 and increments by 1 at a time, you would do it like this:
+
+    ^numiterate~5~1¤1
+
+Or if you wanted to create an incremental number function that starts with 700 and increments with a number between 12 and 56, you would define it like this:
+
+    ^numiterate~700~12¤56
+
+*Date incremental syntax*
+
+    ^datiterate~<start from date>
 
 ## Examples
