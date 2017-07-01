@@ -188,7 +188,7 @@ Or if you wanted to create a date incremental that started on June 24 2017, at 1
 
 *Creating a column called event_date, that is used as an incremental event occurrence and increments by 2-7 seconds for every row*
 
-    event_date#date#^datiterate~18042017-08:00:00~seconds¤2¤7
+    event_date#date#^datiterate~18042017-08:00:00~seconds¤2¤7#<input arguments>
 
 ###### Referential data generator
 This is one of the other built-in generators. This generator makes it possible to create values that can used as references in foreign keys. So the basics of the generator is that you refer to an existing table and column that matches your data type, and you define how many child rows you would like for each parent value.
@@ -197,26 +197,30 @@ This is one of the other built-in generators. This generator makes it possible t
 
     £<table name>¤<column name>¤<reference count type>¤<count type format>
 
-For the <table name> value it has to be a table that the user creating and executing the generator has privileges to access. <column name> has to be an actual column name from the <table name>. For <reference count type> there are 3 different values:
+For the table name value it has to be a table that the user creating and executing the generator has privileges to access. Column name has to be an actual column name from the table name. For reference count type there are 3 different values:
 
 - *simple* - Where you just define a single number of child rows per parent table.
 - *range* - Where for every parent row, you define a range of possible child rows.
 - *weighted* - Where you set a weight for every possible number of child rows.
 
-<count type format> depends on the value that has been set for the <reference count type>.
+Count type format depends on the value that has been set for the <reference count type>.
 
-- *simple type format* - <single number>
-- *range type format* - <range start number>,<range end number>
-- *weighted* - <number of rows>~<weight>^<number of child rows>~<weight>
+- *simple type format* - [single number]
+- *range type format* - [range start number],[range end number]
+- *weighted* - [number of child rows]~[weight]^[number of child rows]~[weight]
 
 **Example:**
 
 *Creating a field called prod_id, referencing product table and the column product_id, with only one child row*
 
-    prod_id#number#£product¤product_id¤simple¤1
+    prod_id#number#£product¤product_id¤simple¤1#<input arguments>
 
 *Creating a field called cust_id, referencing customer table and the column customer_id, with between 2 and 7 child rows per parent rows*
 
-    cust_id#number#£customer¤customer_id¤range¤2,7
+    cust_id#number#£customer¤customer_id¤range¤2,7#<input arguments>
+
+*Creating a field called card_id, referencing customer_cards table and the column ccard_id, with a weighted number of child rows. 10% chance for 2 rows, 30% chance for 3 rows and 60% chance for 4 rows*
+
+    card_id#number#£customer_cards¤ccard_id¤weighted¤2~0.1^3~0.3^4~0.6#<input arguments>
 
 ## Examples
