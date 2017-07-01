@@ -230,11 +230,11 @@ This is not really a generator. It is simply if you want a column with a fixed v
 
 *Setting the ename column to always have the value SCOTT*
 
-    ename#varchar2(150)#~SCOTT#<input arguments>
+    ename#varchar2(150)#~SCOTT
 
 *Setting the column called prod_desc to always have the value 'A product description'*
 
-    prod_desc#varchar2(4000)#~A product description#<input arguments>
+    prod_desc#varchar2(4000)#~A product description
 
 ##### Input argument syntax
 This optional field where you can specify if you want to add arguments to the data generator function. The format is just like Oracle input syntax. So either a comma separated list of arguments or named notation. So the same way you would call the function in either sqlplus or plsql.
@@ -256,5 +256,10 @@ Any string argument with quotes, has to have two quotes just as a quote would ne
 *Create a column called first_name, with a data generator to create a name that takes an input called p_gender. That input is defined as a reference to another column called gender in the same generator.*
 
     gender#varchar2(1)#~F@first_name#varchar2(50)#my_pkg.my_name_gen#%%gender%%
+
+### Auto Input Reference
+In cases where you specify data generator functions where the input argument has the same name as another columns data generator function, the generator code will automatically use the output of that function as the input to the next function.
+
+So if you have one function called f_ordertype as the data generator for one column, and then you have a function called f_orderprice in another column and that function has an input parameter called f_ordertype. In that case the value from the first column will be used as the input to the second column.
 
 ## Full Generator Examples
