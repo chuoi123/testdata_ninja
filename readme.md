@@ -36,20 +36,39 @@ The structure of the generator is that for every column in your output you need 
 - The data generator
 - Any input arguments to the data generator.
 
- #### Column Name
- The name of the column is just like a column name in a table definition. It follows the same restrictions in terms of reserved words and characters allowed in the name.
+##### Column Name (required)
+The name of the column is just like a column name in a table definition. It follows the same restrictions in terms of reserved words and characters allowed in the name.
 
- #### Data Type
- The data type of the column can be most of the oracle data types that are supported. Currently the following data types are tested and verified as working:
+##### Data Type (required)
+The data type of the column can be most of the oracle data types that are supported. Currently the following data types are tested and verified as working:
 
- - number
- - varchar2
- - date
- - timestamp
- - clob
- - blob
+- number
+- varchar2
+- date
+- timestamp
+- clob
+- blob
 
- #### Data Generator
- Data generators can be any function that returns a single value.
+##### Data Generator (required)
+Data generators can be any function that returns a single value in the supported data types. This is the place where you define what data you are going to generate for the output. The data generator also includes a couple of built-in special generators. The types of supported generators are:
+
+- Generated value, where a function returns the value.
+- Fixed value, where the value is hard coded.
+- Referential generator where the value is generated from a parent table.
+- Incremental generator, where the values are unique and always incremented.
+
+##### Input Arguments (optional)
+When the data generator is a function, the values for any input parameters can be specified here. You can use the normal oracle notation, so either an ordered comma separated list or named notation where you specify the name of the parameter. This is not a required field in your definition.
+
+### Generator Format Syntax
+
+##### JSON Notation syntax
+> This is where the JSON notation will be described.
+
+##### ASCII Text notation syntax
+The ASCII notation style is a very simple clear text notation to describe your generator. The field definitions in the notation are separated by the '#' character. So a column definition would be defined like this:
+
+        <column name>#<data type>#<data generator>#<input arguments>
+
 
 ## Examples
