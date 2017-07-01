@@ -159,6 +159,34 @@ Or if you wanted to create an incremental number function that starts with 700 a
 
 *Date incremental syntax*
 
-    ^datiterate~<start from date>
+    ^datiterate~<start from date>~<incremental date element type¤increment range start¤increment range end>
+
+The start from date format has to be 'DDMMYYYY-HH24:MI:SS'. The possible  The start from date and range of next increment are not required values. *If you choose not to specify them, the start date will be sysdate, and the increment element will be minutes and the increment start range will be 1 and the increment end range will be 5.* If you choose to specify them, they both have to be specified and in the correct order.
+
+The possible incremental date elements one can specify, are:
+
+- seconds
+- minutes
+- hours
+- days
+- months
+- years
+
+One example could be that you wanted to create a date incremental function that incremented the date with 1 minute for every time we used it, and it should start from May 22'nd 1985 at noon. To define that, it would look like this:
+
+    ^datiterate~22051985-12:00:00~minutes¤1¤1
+
+Or if you wanted to create a date incremental that started on June 24 2017, at 13:32 and for every time we referenced the incremental function it should add between 1 and 4 seconds. A date incremental would look like this:
+
+    ^datiterate~24062017-13:32:00~seconds¤1¤4
+
+###### Referential data generator
+This is one of the other built-in generators. This generator makes it possible to create values that can used as references in foreign keys. So the basics of the generator is that you refer to an existing table and column that matches your data type, and you define how many child rows you would like for each parent value.
+
+There are 3 ways to define how many child rows you want per parent row. 'simple' which is just a single number where you say exactly how any child rows you want per parent row. 'range' is where you define a range, and then each parent row will result in a number of child rows within the range that was defined. The last one is 'weighted', where you define a percentage weight to each number of potential rows you want to create in the child table.
+
+*Reference field syntax*
+
+    £<table name>¤<column name>¤<reference count type>¤
 
 ## Examples
