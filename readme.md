@@ -25,8 +25,12 @@ To install the generator package, simply install the following 2 files:
 
 ## User Guide
 
-- [Generator format description](#Generator-format-description)
-  - [Column Name](#Column-Name--required)
+- [Generator format description](#generator-format-description)
+  - [Column Name](#column-name--required)
+  - [Data Type](#data-type--required)
+  - [Data Generator](#data-generator--required)
+  - [Input Arguments](#input-arguments--optional)
+- [Generator Format Syntax](#generator-format-syntax)
 
 ### Generator format description
 
@@ -42,7 +46,7 @@ The structure of the generator is that for every column in your output you need 
 ##### Column Name -required
 The name of the column is just like a column name in a table definition. It follows the same restrictions in terms of reserved words and characters allowed in the name.
 
-##### Data Type (required)
+##### Data Type -required
 The data type of the column can be most of the oracle data types that are supported. Currently the following data types are tested and verified as working:
 
 - number
@@ -52,7 +56,7 @@ The data type of the column can be most of the oracle data types that are suppor
 - clob
 - blob
 
-##### Data Generator (required)
+##### Data Generator -required
 Data generators can be any function that returns a single value in the supported data types. This is the place where you define what data you are going to generate for the output. The data generator also includes a couple of built-in special generators. The types of supported generators are:
 
 - Generated value, where a function returns the value.
@@ -60,7 +64,7 @@ Data generators can be any function that returns a single value in the supported
 - Referential generator where the value is generated from a parent table.
 - Incremental generator, where the values are unique and always incremented.
 
-##### Input Arguments (optional)
+##### Input Arguments -optional
 When the data generator is a function, the values for any input parameters can be specified here. You can use the normal oracle notation, so either an ordered comma separated list or named notation where you specify the name of the parameter. This is not a required field in your definition.
 
 ### Generator Format Syntax
