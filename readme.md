@@ -25,6 +25,9 @@ To install the generator package, simply install the following 2 files:
 
 ## User Guide
 
+- [Generator format description](#Generator-format-description)
+  - [Column Name](#Column-Name--required)
+
 ### Generator format description
 
 The generators that you create are all defined using a simple text based syntax.
@@ -36,7 +39,7 @@ The structure of the generator is that for every column in your output you need 
 - The data generator
 - Any input arguments to the data generator.
 
-##### Column Name (required)
+##### Column Name -required
 The name of the column is just like a column name in a table definition. It follows the same restrictions in terms of reserved words and characters allowed in the name.
 
 ##### Data Type (required)
