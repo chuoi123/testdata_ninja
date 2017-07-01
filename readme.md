@@ -263,3 +263,12 @@ In cases where you specify data generator functions where the input argument has
 So if you have one function called f_ordertype as the data generator for one column, and then you have a function called f_orderprice in another column and that function has an input parameter called f_ordertype. In that case the value from the first column will be used as the input to the second column.
 
 ## Full Generator Examples
+For more examples on how to use this package you can take a look at the blog series I did on the package on my Codemonth blog:
+
+- [Basic usage](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::12170:Creating-real-test-data---Fast-and-Efficiently)
+- [Foreign key example](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::12570:Test-data-and-foreign-keys)
+- [Using built-in incremental functions](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::12580:Generating-randomized-incremental-values-)
+- [Using columns as references to input arguments](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::13376:Even-more-test-data-generated-using-the-testdata_ninja-plsql-package)
+- [Generating physical tables or CSV output](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::13377:PLSQL-test-data-from-cursor-to-table-or-from-cursor-to-csv)
+- [Recursive foreign key references](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::13378:Recursive-test-data-using-plsql-and-the-testdata_ninja-package)
+- [Demo on auto input references](http://www.codemonth.dk/code_is_good/dev_qa_prod.assert?condition=codemonth::::13379:PLSQL-Test-data-generators-with-auto-back-reference-fields)
