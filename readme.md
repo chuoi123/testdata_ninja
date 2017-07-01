@@ -25,7 +25,7 @@ To install the generator package, simply install the following 2 files:
 
 ## User Guide
 
-### Generator format
+### Generator format description
 
 The generators that you create are all defined using a simple text based syntax.
 
@@ -36,6 +36,20 @@ The structure of the generator is that for every column in your output you need 
 - The data generator
 - Any input arguments to the data generator.
 
-#### Column Name
+ #### Column Name
+ The name of the column is just like a column name in a table definition. It follows the same restrictions in terms of reserved words and characters allowed in the name.
+
+ #### Data Type
+ The data type of the column can be most of the oracle data types that are supported. Currently the following data types are tested and verified as working:
+
+ - number
+ - varchar2
+ - date
+ - timestamp
+ - clob
+ - blob
+
+ #### Data Generator
+ Data generators can be any function that returns a single value.
 
 ## Examples
