@@ -42,6 +42,8 @@ To install the generator package, simply install the following 2 files:
       - [Fixed value data generator](#fixed-value-data-generator)
     - [Input argument syntax](#input-argument-syntax)
 - [Auto Input Reference](#auto-input-reference)
+- [Building Generators](#building-generators)
+- [Using Generators](#using-generators)
 
 ### Generator format description
 
@@ -289,11 +291,32 @@ The way you build a generator is by using the procedure called testdata_ninja.ge
 A simple demonstration code on how to use the procedure to build a generator could be:
 
     declare
-      my_generator_format   varchar2(4000) := 'empid#number#^numiterate~1~1¤1@ename#varchar2#dbms_random.string#''A'',15';
+      my_generator_format   varchar2(4000) := 'empid#number#^numiterate~1~1¤1@ename#varchar2(15)#dbms_random.string#''A'',15';
     begin
       testdata_ninja.generator_create('test_generator', my_generator_format);
     end;
     /
+
+Once the procedure has been run successfully, the generator will be available as a package in the same schema. The name of the generator is always prefixed with 'TDG_'. So in the example above we would have a pacakge called 'TDG_TEST_GENERATOR'. Inside the package is a pipelined function named 'TEST_GENERATOR'. This pipelined function is the actual row generator.
+
+### Using Generators
+
+Once a generator is build you use it by selecting from the generator's pipelined function. So if we take the example from the previous section, we can use the 'TEST_GENERATOR' function like this:
+
+    select * from table(tdg_test_generator.test_generator);
+
+by default the number of rows generated will be 100. This can be changed in 2 different ways. One is by using the first input parameter which is the generator count. So to generate 5000 rows, you would run:
+
+    select * from table(tdg_test_generator.test_generator(5000));
+
+Another way to set the number of rows is to first change the package variable then any subsequent calls to the generator in that session will generate the set amount of rows:
+
+    begin
+      tdg_test_generator.g_default_generator_rows := 5000;
+    end;
+    /
+
+Then any calls to the pipelined function afterwards will generate 5000 rows in the results, unless the number of rows are specified as the input.
 
 ## Full Generator Examples
 For more examples on how to use this package you can take a look at the blog series I did on the package on my Codemonth blog:
