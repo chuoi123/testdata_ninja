@@ -80,7 +80,42 @@ See below sections for a detailed description of each field definition and the s
 ###### Column name syntax
 The column name field, has to follow the standard Oracle column syntax and rules. So if your version is less than 12.2 there is a 30 character length restriction or else the column name can be 128 characters long.
 
+**Examples:**
 
+*A column with the name "ename"*
 
+    ename#<data type>#<data generator>#<input arguments>
+
+*A column with the name "birth_date"*
+
+    birth_date#<data type>#<data generator>#<input arguments>
+
+*A column with the name "order_amount"*
+
+    order_amount#<data type>#<data generator>#<input arguments>
+
+###### Data type syntax
+The data type field has to be a valid Oracle data type. For any data types that require a length specification, you have to specify that as well. For now only the following data types has been verified as working:
+
+- number
+- varchar2
+- date
+- timestamp
+- clob
+- blob
+
+**Examples:**
+
+*Defining the "ename" column as varchar2(10)*
+
+    ename#varchar2(10)#<data generator>#<input arguments>
+
+*Defining the column birth_date as date data type*
+
+    birth_date#date#<data generator>#<input arguments>
+
+*Defining the column order_amount as number 16,4*
+
+    order_amount#number(16,4)#<data generator>#<input arguments>
 
 ## Examples
