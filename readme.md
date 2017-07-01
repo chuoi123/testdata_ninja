@@ -70,5 +70,17 @@ The ASCII notation style is a very simple clear text notation to describe your g
 
         <column name>#<data type>#<data generator>#<input arguments>
 
+When you have multiple columns in your generator output, each column definition is separated by the '@' character. So a 2 column generator definition would look like this:
+
+        <column1 name>#<data type>#<data generator>#<input arguments>
+        @<column2 name>#<data type>#<data generator>#<input arguments>
+
+See below sections for a detailed description of each field definition and the syntax.
+
+###### Column name syntax
+The column name field, has to follow the standard Oracle column syntax and rules. So if your version is less than 12.2 there is a 30 character length restriction or else the column name can be 128 characters long.
+
+
+
 
 ## Examples
