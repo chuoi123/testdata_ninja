@@ -236,4 +236,25 @@ This is not really a generator. It is simply if you want a column with a fixed v
 
     prod_desc#varchar2(4000)#~A product description#<input arguments>
 
-## Examples
+##### Input argument syntax
+This optional field where you can specify if you want to add arguments to the data generator function. The format is just like Oracle input syntax. So either a comma separated list of arguments or named notation. So the same way you would call the function in either sqlplus or plsql.
+
+The arguments themselves can also be references to other column values in the test data generator columns. You can reference other columns using two '%' on each side. So if you wanted one of the arguments for a data generator to be from another column called prod_id, you can reference it as %%prod_id%%.
+
+Any string argument with quotes, has to have two quotes just as a quote would need when setting a string value in plsql.
+
+**Example:**
+
+*Create a column called words and specify standard input to the dbms_random.string function. It takes 2 arguments, type and length*
+
+    words#varchar2(50)#dbms_random.string#''A'',15
+
+*Create a column called short where we only want to specify the input value for the parameter called len to a function called my_pkg.my_func*
+
+    short#varchar2(50)#my_pkg.my_func#len => 10
+
+*Create a column called first_name, with a data generator to create a name that takes an input called p_gender. That input is defined as a reference to another column called gender in the same generator.*
+
+    gender#varchar2(1)#~F@first_name#varchar2(50)#my_pkg.my_name_gen#%%gender%%
+
+## Full Generator Examples
