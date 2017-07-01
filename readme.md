@@ -223,4 +223,17 @@ Count type format depends on the value that has been set for the <reference coun
 
     card_id#number#£customer_cards¤ccard_id¤weighted¤2~0.1^3~0.3^4~0.6#<input arguments>
 
+###### Fixed value data generator
+This is not really a generator. It is simply if you want a column with a fixed value in your generator, you can use the fixed value format. Simply start the generator field with the '~' character and everything after that character and until either the '#' or the '@' character is met, is set as the fixed value for that column.
+
+**Example:**
+
+*Setting the ename column to always have the value SCOTT*
+
+    ename#varchar2(150)#~SCOTT#<input arguments>
+
+*Setting the column called prod_desc to always have the value 'A product description'*
+
+    prod_desc#varchar2(4000)#~A product description#<input arguments>
+
 ## Examples
