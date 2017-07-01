@@ -280,6 +280,21 @@ In cases where you specify data generator functions where the input argument has
 
 So if you have one function called f_ordertype as the data generator for one column, and then you have a function called f_orderprice in another column and that function has an input parameter called f_ordertype. In that case the value from the first column will be used as the input to the second column.
 
+### Building Generators
+The way you build a generator is by using the procedure called testdata_ninja.generator_create. It has two input parameters:
+
+- *generator_name* - The name of the generator. For versions older than 12.2 it is limited to a length of 26 characters.
+- *generator_format* - This is the format of all your columns in the generator.
+
+A simple demonstration code on how to use the procedure to build a generator could be:
+
+    declare
+      my_generator_format   varchar2(4000) := 'empid#number#^numiterate~1~1¤1@ename#varchar2#dbms_random.string#''A'',15';
+    begin
+      testdata_ninja.generator_create('test_generator', my_generator_format);
+    end;
+    /
+
 ## Full Generator Examples
 For more examples on how to use this package you can take a look at the blog series I did on the package on my Codemonth blog:
 
