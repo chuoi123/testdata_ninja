@@ -44,6 +44,10 @@ To install the generator package, simply install the following 2 files:
 - [Auto Input Reference](#auto-input-reference)
 - [Building Generators](#building-generators)
 - [Using Generators](#using-generators)
+  - [Standard row generation](#standard-row-generation)
+  - [Alternative row generation](#alternative-row-generation)
+    - [Table generation](#table-generation)
+    - [CSV generation](#csv-generation)
 
 ### Generator format description
 
@@ -301,6 +305,8 @@ Once the procedure has been run successfully, the generator will be available as
 
 ### Using Generators
 
+##### Standard row generation
+
 Once a generator is build you use it by selecting from the generator's pipelined function. So if we take the example from the previous section, we can use the 'TEST_GENERATOR' function like this:
 
     select * from table(tdg_test_generator.test_generator);
@@ -317,6 +323,27 @@ Another way to set the number of rows is to first change the package variable th
     /
 
 Then any calls to the pipelined function afterwards will generate 5000 rows in the results, unless the number of rows are specified as the input.
+
+##### Alternative row generation
+
+There are other built-in procedures and functions in the generator package to create alternative useful outputs.
+
+###### Table generation
+
+Whenever you want to persist the output of the test data generator to a table there are two options. One is to simply use the CTAS syntax:
+
+    create table as select * from table(tdg_test_generator.test_generator);
+
+The other option is using the built-in procedure called to_table. This procedure has 4 input parameters:
+
+Parameter Name | Data Type | Default Value | Description
+--- | --- | --- | ---
+table_name | varchar2 | No default value | The name of the table you want to create.
+generator_count | number | Value of package variable g_default_generator_rows | The number of rows created in the new table.
+add_foreign_keys | boolean | false | If any referential generators are specified then create foreign key constraints if set to true.
+overwrite | boolean | false | If table name specified already exists and this is true, it will drop and re-create table.
+
+###### CSV generation
 
 ## Full Generator Examples
 For more examples on how to use this package you can take a look at the blog series I did on the package on my Codemonth blog:
