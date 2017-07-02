@@ -325,11 +325,9 @@ Another way to set the number of rows is to first change the package variable th
 Then any calls to the pipelined function afterwards will generate 5000 rows in the results, unless the number of rows are specified as the input.
 
 ##### Alternative row generation
-
 There are other built-in procedures and functions in the generator package to create alternative useful outputs.
 
 ###### Table generation
-
 Whenever you want to persist the output of the test data generator to a table there are two options. One is to simply use the CTAS syntax:
 
     create table as select * from table(tdg_test_generator.test_generator);
@@ -343,7 +341,27 @@ generator_count | number | Value of package variable g_default_generator_rows | 
 add_foreign_keys | boolean | false | If any referential generators are specified then create foreign key constraints if set to true.
 overwrite | boolean | false | If table name specified already exists and this is true, it will drop and re-create table.
 
+To create the table, simply call the procedure:
+
+    begin
+      tdg_test_generator.to_table('my_table_name');
+    end;
+    /
+
 ###### CSV generation
+The test data generator package also has a built-in pipelined function to produce CSV output that can be directly outputted to a file. Simply select from the following function:
+
+    select * from table(tdg_test_generator.to_csv);
+
+The function takes 5 input parameters:
+
+Parameter Name | Data Type | Default Value | Description
+--- | --- | --- | ---
+generator_count | number | Value of package variable g_default_generator_rows | The number of rows created in the new table.
+delimiter | varchar2 | ',' | The delimiter between fields in the output.
+optional_enclose | varchar2 | '' | What to optionally enclose fields in.
+date_format | varchar2 | 'dd-mon-yyyy hh24:mi:ss' | The date format to use when extracting dates.
+include_header | boolean | true | If set to true, generate a header in the output.
 
 ## Full Generator Examples
 For more examples on how to use this package you can take a look at the blog series I did on the package on my Codemonth blog:
