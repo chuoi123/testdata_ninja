@@ -452,7 +452,7 @@ as
           dbms_sql.parse(l_cursor, l_statement, dbms_sql.native);
           dbms_sql.describe_columns(l_cursor, l_col_count, l_table_description);
           for i in 1..l_col_count loop
-            l_line := l_line || l_delimiter || ''"'' || l_table_description(i).col_name || ''"'';
+            l_line := l_line || l_delimiter || l_enclose || l_table_description(i).col_name || l_enclose;
             dbms_sql.define_column( l_cursor, i, l_value, 4000 );
             l_delimiter := delimiter;
           end loop;
