@@ -5,11 +5,15 @@ as
   -- Keep track of output values.
   type track_output_tab is table of varchar2(128) index by varchar2(128);
   l_output_track          track_output_tab;
+  -- Keep track of output order for topo sort.
+  type track_output_ord_tab is table of number index by varchar2(128);
+  l_output_order_track    track_output_ord_tab;
   -- Keep track of input values.
   type track_input_rec is record (
     input_position        number
     , input_name          varchar2(128)
     , draw_from_col       varchar2(128)
+    , draw_from_col_num   number
   );
   type track_input_tab1 is table of track_input_rec;
   type track_input_tab2 is table of track_input_tab1;
@@ -28,6 +32,7 @@ as
     l_column_count          number := regexp_count(column_metadata, '@') + 1;
     l_tmp_column            varchar2(4000);
     l_tmp_reference         varchar2(4000);
+    l_tmp_generated         varchar2(4000);
     l_reference_replace     number;
     l_tmp_pkg_name          varchar2(128);
     l_tmp_fnc_name          varchar2(128);
@@ -58,6 +63,7 @@ as
         -- We have a generated column. Save the generator name, for use in auto input reference.
         l_tmp_fnc_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') + 1));
         l_output_track(l_tmp_fnc_name) := util_random.ru_extract(l_tmp_column, 1, '#');
+        l_output_order_track(l_tmp_fnc_name) := i;
       end if;
     end loop;
 
@@ -82,6 +88,7 @@ as
             l_input_track(i)(l_input_track(i).count).input_name := y.argument_name;
             l_input_track(i)(l_input_track(i).count).input_position := y.position;
             l_input_track(i)(l_input_track(i).count).draw_from_col := l_output_track(y.argument_name);
+            l_input_track(i)(l_input_track(i).count).draw_from_col_num := l_output_order_track(l_tmp_fnc_name);
           end if;
         end loop;
       end if;
@@ -227,7 +234,24 @@ as
         end if;
       else
         l_ret_var(l_ret_idx).column_type := 'generated';
-        l_ret_var(l_ret_idx).generator := util_random.ru_extract(l_tmp_column, 3, '#');
+        -- First check if we allow nulls. If the generator is surrounded by parentheses
+        -- then we allow nulls. The number after the closing parentheses is the percentage
+        -- of rows that should be null.
+        l_tmp_generated := util_random.ru_extract(l_tmp_column, 3, '#');
+        if substr(l_tmp_generated, 1, 1) = '(' then
+          -- Column allowed to be null.
+          -- check if nullable percentage is set, else default to 10%
+          if substr(l_tmp_generated, -1, 1) = ')' then
+            -- No nullable defined.
+            l_ret_var(l_ret_idx).generator_nullable := 10;
+          else
+            l_ret_var(l_ret_idx).generator_nullable := substr(l_tmp_generated, instr(l_tmp_generated, ')') + 1);
+          end if;
+          l_ret_var(l_ret_idx).generator := substr(l_tmp_generated, 2, instr(l_tmp_generated, ')') - 2);
+        else
+          l_ret_var(l_ret_idx).generator := l_tmp_generated;
+          l_ret_var(l_ret_idx).generator_nullable := null;
+        end if;
         if length(util_random.ru_extract(l_tmp_column, 4, '#')) != length(l_tmp_column) then
           -- Manually specified input variables always override auto replace.
           l_ret_var(l_ret_idx).generator_args := util_random.ru_extract(l_tmp_column, 4, '#');
@@ -366,7 +390,10 @@ as
           , delimiter         varchar2 default '',''
           , optional_enclose  varchar2 default ''''
           , date_format       varchar2 default ''dd-mon-yyyy hh24:mi:ss''
-          , include_header    boolean default true
+          , include_header    number default 1
+          , custom_header     varchar2 default null
+          , include_footer    number default 0
+          , custom_footer     varchar2 default null
         )
         return csv_tab
         pipelined;
@@ -397,7 +424,10 @@ as
           , delimiter         varchar2 default '',''
           , optional_enclose  varchar2 default ''''
           , date_format       varchar2 default ''dd-mon-yyyy hh24:mi:ss''
-          , include_header    boolean default true
+          , include_header    number default 1
+          , custom_header     varchar2 default null
+          , include_footer    number default 0
+          , custom_footer     varchar2 default null
         )
         return csv_tab
         pipelined
@@ -414,6 +444,7 @@ as
           l_value                 varchar2(4000);
           l_ret_var               csv_rec;
           l_status                integer;
+          l_rows_processed        number;
 
         begin
 
@@ -425,8 +456,14 @@ as
             dbms_sql.define_column( l_cursor, i, l_value, 4000 );
             l_delimiter := delimiter;
           end loop;
-          l_ret_var.csv := l_line;
-          pipe row(l_ret_var);
+          if include_header = 1 then
+            if custom_header is null then
+              l_ret_var.csv := l_line;
+            else
+              l_ret_var.csv := custom_header;
+            end if;
+            pipe row(l_ret_var);
+          end if;
           l_line := '''';
           l_status := dbms_sql.execute(l_cursor);
           while (dbms_sql.fetch_rows(l_cursor) > 0) loop
@@ -440,6 +477,17 @@ as
             pipe row(l_ret_var);
             l_line := '''';
           end loop;
+
+          if include_footer = 1 then
+            l_rows_processed := dbms_sql.last_row_count;
+            if custom_footer is null then
+              l_line := ''Rows processed: '' || l_rows_processed;
+              l_ret_var.csv := l_line;
+            else
+              l_ret_var.csv := replace(custom_footer, ''%%rows_processed%%'', l_rows_processed);
+            end if;
+            pipe row(l_ret_var);
+          end if;
 
           dbms_sql.close_cursor(l_cursor);
 
@@ -577,13 +625,23 @@ as
         l_generator_pkg_body := l_generator_pkg_body || '
           l_ret_var.' || l_generator_columns(i).column_name || ' := l_bltin_' || l_generator_columns(i).column_name || ';' || l_generator_columns(i).builtin_logic_code;
       else
-        -- Check if we need to add arguments or not
-        if l_generator_columns(i).generator_args is not null then
-          l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || ');';
+        -- Check if we need to add arguments or not and if nullable is enabled.
+        if l_generator_columns(i).generator_nullable is not null then
+          if l_generator_columns(i).generator_args is not null then
+            l_generator_pkg_body := l_generator_pkg_body || '
+              case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || '); end case;';
+          else
+            l_generator_pkg_body := l_generator_pkg_body || '
+              case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '; end case;';
+          end if;
         else
-          l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+          if l_generator_columns(i).generator_args is not null then
+            l_generator_pkg_body := l_generator_pkg_body || '
+              l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || ');';
+          else
+            l_generator_pkg_body := l_generator_pkg_body || '
+              l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+          end if;
         end if;
       end if;
     end loop;

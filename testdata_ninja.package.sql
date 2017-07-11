@@ -19,6 +19,7 @@ as
     , column_type         varchar2(500)
     , generator           varchar2(500)
     , generator_args      varchar2(500)
+    , generator_nullable  number
     , reference_table     varchar2(4000)
     , reference_column    varchar2(500)
     , ref_dist_type       varchar2(500)
