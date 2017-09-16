@@ -19,6 +19,54 @@ as
   type track_input_tab2 is table of track_input_tab1;
   l_input_track           track_input_tab2;
 
+  function guess_data_generator (
+    data_type                   in        varchar2
+    , column_name               in        varchar2
+    , value_example             in        varchar2 default null
+  )
+  return varchar2
+
+  as
+
+    l_ret_var               varchar2(500) := null;
+
+  begin
+
+    dbms_application_info.set_action('guess_data_generator');
+
+    if value_example is null then
+      -- Only guess using type and name.
+      if data_type = 'VARCHAR2' then
+        case
+          when instr(upper(column_name), 'FNAME') > 0 then l_ret_var := 'person_random.r_firstname';
+          when instr(upper(column_name), 'FIRSTNAME') > 0 then l_ret_var := 'person_random.r_firstname';
+          when instr(upper(column_name), 'FIRST') > 0 and instr(upper(column_name), 'NAME') > 0 then l_ret_var := 'person_random.r_firstname';
+          when instr(upper(column_name), 'LNAME') > 0 then l_ret_var := 'person_random.r_lastname';
+          when instr(upper(column_name), 'LASTNAME') > 0 then l_ret_var := 'person_random.r_lastname';
+          when instr(upper(column_name), 'LAST') > 0 and instr(upper(column_name), 'NAME') > 0 then l_ret_var := 'person_random.r_lastname';
+          when instr(upper(column_name), 'NAME') > 0 then l_ret_var := 'person_random.r_name';
+        else l_ret_var := null;
+        end case;
+      elsif data_type = 'NUMBER' then
+        case
+          when instr(upper(column_name), 'SALARY') > 0 then l_ret_var := 'person_random.r_salary';
+        else l_ret_var := null;
+        end case;
+      elsif data_type = 'DATE' then
+        l_ret_var := null;
+      end if;
+    end if;
+
+    dbms_application_info.set_action(null);
+
+    return l_ret_var;
+
+    exception
+      when others then
+        dbms_application_info.set_action(null);
+        raise;
+
+  end guess_data_generator;
 
   function parse_generator_cols (
     column_metadata             in        varchar2
@@ -288,9 +336,171 @@ as
 
   end parse_generator_cols;
 
+  function parse_cols_from_table (
+    tab_name                in        varchar2
+  )
+  return generator_columns
+
+  as
+
+    l_ret_var               generator_columns := generator_columns();
+    l_curr_idx              number;
+    l_curr_stats_idx        number;
+    l_guessed_generator     varchar2(4000);
+    l_base_table_info       user_tables%rowtype;
+    type tab_cols_tab is table of user_tab_cols%rowtype;
+    l_base_table_cols_info  tab_cols_tab := tab_cols_tab();
+    l_base_table_stats      user_tab_statistics%rowtype;
+    type tab_cols_stats_tab is table of user_tab_col_statistics%rowtype;
+    l_base_table_col_stats  tab_cols_stats_tab := tab_cols_stats_tab();
+
+    -- Working assumptions.
+    l_is_unique             boolean := false;
+
+    cursor get_col_info is
+      select * from user_tab_cols
+      where table_name = upper(tab_name)
+      order by column_id;
+
+    cursor get_col_stats_info is
+      select * from user_tab_col_statistics
+      where table_name = upper(tab_name);
+
+    cursor get_tab_constraints is
+      select
+        a.table_name
+        , a.column_name
+        , a.constraint_name
+        , c.owner
+        , c.r_owner
+        , c_pk.table_name r_table_name
+        , c_pk.constraint_name r_pk
+      from
+        user_cons_columns a
+      join
+        user_constraints c on a.constraint_name = c.constraint_name
+      join
+        user_constraints c_pk on c.r_constraint_name = c_pk.constraint_name
+      where
+        c.constraint_type = 'R'
+      and
+        a.table_name = upper(tab_name);
+
+    type cons_list_tab is table of get_tab_constraints%rowtype;
+
+    l_base_table_cons_info          cons_list_tab := cons_list_tab();
+
+  begin
+
+    dbms_application_info.set_action('parse_cols_from_table');
+
+    if dbms_assert.sql_object_name(upper(tab_name)) = upper(tab_name) then
+      -- The table exists, and if not this will throw exception.
+      -- Get all the current information we have on the table into variables
+      -- for use in generating a format as close to real life as possible.
+      -- BASE INFO
+      select * into l_base_table_info from user_tables where table_name = upper(tab_name);
+      for i in get_col_info loop
+        l_base_table_cols_info.extend(1);
+        l_base_table_cols_info(l_base_table_cols_info.count) := i;
+      end loop;
+      -- STATISTICS INFO
+      select * into l_base_table_stats from user_tab_statistics where table_name = upper(tab_name);
+      for i in get_col_stats_info loop
+        l_base_table_col_stats.extend(1);
+        l_base_table_col_stats(l_base_table_col_stats.count) := i;
+      end loop;
+      -- CONSTRAINTS INFO
+      for i in get_tab_constraints loop
+        l_base_table_cons_info.extend(1);
+        l_base_table_cons_info(l_base_table_cons_info.count) := i;
+      end loop;
+
+      for i in 1..l_base_table_cols_info.count loop
+        l_ret_var.extend(1);
+        l_curr_idx := l_ret_var.count;
+
+        -- Find col stats index.
+        for y in 1..l_base_table_col_stats.count loop
+          if l_base_table_col_stats(y).column_name = l_base_table_cols_info(i).column_name then
+            l_curr_stats_idx := y;
+            exit;
+          end if;
+        end loop;
+
+        l_ret_var(l_curr_idx).column_name := l_base_table_cols_info(i).column_name;
+        l_ret_var(l_curr_idx).column_type := 'generated';
+        -- Set some working assumptions.
+        if l_base_table_stats.num_rows = l_base_table_col_stats(l_curr_stats_idx).num_distinct then
+          l_is_unique := true;
+        else
+          l_is_unique := false;
+        end if;
+
+        l_guessed_generator := guess_data_generator(l_base_table_cols_info(i).data_type, l_base_table_cols_info(i).column_name);
+        if l_base_table_cols_info(i).data_type = 'VARCHAR2' then
+          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type || '(' || l_base_table_cols_info(i).data_length || ')';
+          if l_guessed_generator is null then
+            l_ret_var(l_curr_idx).generator := 'core_random.r_string';
+            l_ret_var(l_curr_idx).generator_args := 'core_random.r_natural('|| length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value)) ||', '|| length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).high_value)) ||') , ''abcdefghijklmnopqrstuvwxy''';
+          else
+            l_ret_var(l_curr_idx).generator := l_guessed_generator;
+          end if;
+        elsif l_base_table_cols_info(i).data_type = 'NUMBER' then
+          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
+          if l_is_unique then
+            -- This is a unqiue number, so make it a builtin type.
+            l_ret_var(l_curr_idx).column_type := 'builtin';
+            l_ret_var(l_curr_idx).builtin_type := 'numiterate';
+            l_ret_var(l_curr_idx).builtin_function := 'util_random.ru_number_increment';
+            l_ret_var(l_curr_idx).builtin_startpoint := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value);
+            l_ret_var(l_curr_idx).builtin_increment := '1¤1';
+            -- Define code.
+            l_ret_var(l_curr_idx).builtin_define_code := '
+              l_bltin_' || l_ret_var(l_curr_idx).column_name || ' number := ' || l_ret_var(l_curr_idx).builtin_startpoint || ';';
+            -- Increment logic.
+            l_ret_var(l_curr_idx).builtin_logic_code := '
+              l_bltin_' || l_ret_var(l_curr_idx).column_name || ' := ' || l_ret_var(l_curr_idx).builtin_function || '(l_bltin_' || l_ret_var(l_curr_idx).column_name || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 1, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 2, '¤') || ');';
+          else
+            if l_guessed_generator is null then
+              l_ret_var(l_curr_idx).generator := 'core_random.r_integer';
+              l_ret_var(l_curr_idx).generator_args := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value) || ',' || utl_raw.cast_to_number(l_base_table_cols_info(i).high_value);
+            else
+              l_ret_var(l_curr_idx).generator := l_guessed_generator;
+            end if;
+          end if;
+        elsif l_base_table_cols_info(i).data_type = 'DATE' then
+          l_ret_var(l_curr_idx).generator := 'time_random.r_date';
+          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
+        else
+          l_ret_var(l_curr_idx).generator := 'core_random.r_string';
+          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
+        end if;
+
+        if l_base_table_cols_info(i).nullable = 'Y' and l_ret_var(l_curr_idx).column_type = 'generated' then
+          if l_base_table_col_stats(l_curr_idx).num_nulls > 0 then
+            l_ret_var(l_curr_idx).generator_nullable := l_base_table_col_stats(l_curr_idx).num_nulls/(l_base_table_stats.num_rows/100);
+          end if;
+        end if;
+      end loop;
+
+    end if;
+
+    dbms_application_info.set_action(null);
+
+    return l_ret_var;
+
+    exception
+      when others then
+        dbms_application_info.set_action(null);
+        raise;
+
+  end parse_cols_from_table;
+
   procedure generator_create (
     generator_name              in        varchar2
-    , generator_format          in        varchar2
+    , generator_format          in        varchar2 default null
+    , generator_table           in        varchar2 default null
   )
 
   as
@@ -304,11 +514,15 @@ as
 
     dbms_application_info.set_action('generator_create');
 
-    l_generator_columns := parse_generator_cols(generator_format);
+    if generator_table is null and generator_format is not null then
+      l_generator_columns := parse_generator_cols(generator_format);
+    elsif generator_format is null and generator_table is not null then
+      l_generator_columns := parse_cols_from_table(generator_table);
+    end if;
 
     l_generator_pkg_head := 'create or replace package tdg_'|| generator_name ||'
       as
-        g_default_generator_rows      number := 100;
+        g_default_generator_rows      number := '|| g_default_generator_rows ||';
 
         type csv_rec is record (
           csv    varchar2(4000)

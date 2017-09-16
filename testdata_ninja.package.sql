@@ -54,7 +54,8 @@ as
   */
   procedure generator_create (
     generator_name              in        varchar2
-    , generator_format          in        varchar2
+    , generator_format          in        varchar2 default null
+    , generator_table           in        varchar2 default null
   );
 
 end testdata_ninja;
