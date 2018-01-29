@@ -58,5 +58,14 @@ as
     , generator_table           in        varchar2 default null
   );
 
+  function guess_data_generator (
+    data_type                   in        varchar2
+    , column_name               in        varchar2
+    , value_example             in        varchar2 default null
+    , value_low                 in        raw default null
+    , value_high                in        raw default null
+  )
+  return varchar2;
+
 end testdata_ninja;
 /

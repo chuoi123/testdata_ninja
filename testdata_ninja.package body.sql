@@ -23,37 +23,117 @@ as
     data_type                   in        varchar2
     , column_name               in        varchar2
     , value_example             in        varchar2 default null
+    , value_low                 in        raw default null
+    , value_high                in        raw default null
   )
   return varchar2
 
   as
 
     l_ret_var               varchar2(500) := null;
+    l_guess_idx             varchar2(128);
+    type seed_vals_varchar_tab is table of varchar2(4000) index by varchar2(128);
+    l_guess_varchar_seed_vals       seed_vals_varchar_tab;
+    l_guess_number_seed_vals        seed_vals_varchar_tab;
+    l_guess_date_seed_vals          seed_vals_varchar_tab;
+    l_guess_range_low_num           number := null;
+    l_guess_range_high_num          number := null;
+    l_guess_range_high_char         varchar2(32000) := null;
+    l_guess_range_low_char          varchar2(32000) := null;
+    l_guess_range_low_date          date := null;
+    l_guess_range_high_date         date := null;
 
   begin
 
     dbms_application_info.set_action('guess_data_generator');
 
+    if value_low is not null then
+      case data_type
+        when 'NUMBER' then l_guess_range_low_num := utl_raw.cast_to_number(value_low);
+        when 'VARCHAR2' then l_guess_range_low_char := utl_raw.cast_to_varchar2(value_low);
+        when 'DATE' then l_guess_range_low_date := to_date(rtrim(to_char(100*(to_number(substr(value_low,1,2),'XX')-100)
+                                                    + (to_number(substr(value_low,3,2),'XX')-100),'fm0000')||'-'||
+                                                    to_char(to_number(substr(value_low,5,2),'XX'),'fm00')||'-'||
+                                                    to_char(to_number(substr(value_low,7,2),'XX'),'fm00')||' '||
+                                                    to_char(to_number(substr(value_low,9,2),'XX')-1,'fm00')||':'||
+                                                    to_char(to_number(substr(value_low,11,2),'XX')-1,'fm00')||':'||
+                                                    to_char(to_number(substr(value_low,13,2),'XX')-1,'fm00')), 'YYYY-MM-DD HH24:MI:SS');
+        else null;
+      end case;
+    end if;
+
+    if value_high is not null then
+      case data_type
+        when 'NUMBER' then l_guess_range_high_num := utl_raw.cast_to_number(value_high);
+        when 'VARCHAR2' then l_guess_range_high_char := utl_raw.cast_to_varchar2(value_high);
+        when 'DATE' then l_guess_range_high_date := to_date(rtrim(to_char(100*(to_number(substr(value_high,1,2),'XX')-100)
+                                                    + (to_number(substr(value_high,3,2),'XX')-100),'fm0000')||'-'||
+                                                    to_char(to_number(substr(value_high,5,2),'XX'),'fm00')||'-'||
+                                                    to_char(to_number(substr(value_high,7,2),'XX'),'fm00')||' '||
+                                                    to_char(to_number(substr(value_high,9,2),'XX')-1,'fm00')||':'||
+                                                    to_char(to_number(substr(value_high,11,2),'XX')-1,'fm00')||':'||
+                                                    to_char(to_number(substr(value_high,13,2),'XX')-1,'fm00')), 'YYYY-MM-DD HH24:MI:SS');
+        else null;
+      end case;
+    end if;
+
+    l_guess_varchar_seed_vals('person_random.r_firstname') := 'FNAME,FIRSTNAME,FIRST_NAME';
+    l_guess_varchar_seed_vals('person_random.r_lastname') := 'LNAME,LASTNAME,LAST_NAME,ENAME';
+    l_guess_varchar_seed_vals('person_random.r_name') := 'NAME,FULLNAME,FULL_NAME';
+    l_guess_number_seed_vals('person_random.r_salary') := 'SALARY,SAL,BONUS,PAY';
+    l_guess_number_seed_vals('finance_random.r_amount#[low],[high]') := 'PRICE,ORDER,PAYMENT,COST';
+    l_guess_varchar_seed_vals('location_random.r_country#true') := 'CNTRY,COUNTRY,CTRY';
+    l_guess_varchar_seed_vals('person_random.r_jobtitle') := 'JOB,TITLE';
+    l_guess_varchar_seed_vals('location_random.r_city') := 'LOCATION,LOC,CITY,TOWN';
+    l_guess_date_seed_vals('time_random.r_datebetween#to_date(''[low]'',''DD-MON-YYYY HH24:MI:SS''),to_date(''[high]'',''DD-MON-YYYY HH24:MI:SS'')') := 'HIREDATE,BIRTHDAY,BDAY';
+
     if value_example is null then
       -- Only guess using type and name.
       if data_type = 'VARCHAR2' then
-        case
-          when instr(upper(column_name), 'FNAME') > 0 then l_ret_var := 'person_random.r_firstname';
-          when instr(upper(column_name), 'FIRSTNAME') > 0 then l_ret_var := 'person_random.r_firstname';
-          when instr(upper(column_name), 'FIRST') > 0 and instr(upper(column_name), 'NAME') > 0 then l_ret_var := 'person_random.r_firstname';
-          when instr(upper(column_name), 'LNAME') > 0 then l_ret_var := 'person_random.r_lastname';
-          when instr(upper(column_name), 'LASTNAME') > 0 then l_ret_var := 'person_random.r_lastname';
-          when instr(upper(column_name), 'LAST') > 0 and instr(upper(column_name), 'NAME') > 0 then l_ret_var := 'person_random.r_lastname';
-          when instr(upper(column_name), 'NAME') > 0 then l_ret_var := 'person_random.r_name';
-        else l_ret_var := null;
-        end case;
+        l_guess_idx := l_guess_varchar_seed_vals.first;
+        while l_guess_idx is not null loop
+          if util_random.ru_inlist(l_guess_varchar_seed_vals(l_guess_idx), upper(column_name)) then
+            l_ret_var := l_guess_idx;
+            if l_guess_range_low_char is not null then
+              -- We always have both low and high when it is not null. So automatically replace both.
+              l_ret_var := replace(replace(l_ret_var, '[low]', l_guess_range_low_char), '[high]', l_guess_range_high_char);
+            else
+              l_ret_var := nvl(substr(l_ret_var, 1, instr(l_ret_var, '#') - 1), l_ret_var);
+            end if;
+            exit;
+          end if;
+          l_guess_idx := l_guess_varchar_seed_vals.next(l_guess_idx);
+        end loop;
       elsif data_type = 'NUMBER' then
-        case
-          when instr(upper(column_name), 'SALARY') > 0 then l_ret_var := 'person_random.r_salary';
-        else l_ret_var := null;
-        end case;
+        l_guess_idx := l_guess_number_seed_vals.first;
+        while l_guess_idx is not null loop
+          if util_random.ru_inlist(l_guess_number_seed_vals(l_guess_idx), upper(column_name)) then
+            l_ret_var := l_guess_idx;
+            if l_guess_range_low_num is not null then
+              -- We always have both low and high when it is not null. So automaticall replace both.
+              l_ret_var := replace(replace(l_ret_var, '[low]', l_guess_range_low_num), '[high]', l_guess_range_high_num);
+            else
+              l_ret_var := nvl(substr(l_ret_var, 1, instr(l_ret_var, '#') - 1), l_ret_var);
+            end if;
+            exit;
+          end if;
+          l_guess_idx := l_guess_number_seed_vals.next(l_guess_idx);
+        end loop;
       elsif data_type = 'DATE' then
-        l_ret_var := null;
+        l_guess_idx := l_guess_date_seed_vals.first;
+        while l_guess_idx is not null loop
+          if util_random.ru_inlist(l_guess_date_seed_vals(l_guess_idx), upper(column_name)) then
+            l_ret_var := l_guess_idx;
+            if l_guess_range_low_date is not null then
+              -- We always have both low and high when it is not null. So automaticall replace both.
+              l_ret_var := replace(replace(l_ret_var, '[low]', l_guess_range_low_date), '[high]', l_guess_range_high_date);
+            else
+              l_ret_var := nvl(substr(l_ret_var, 1, instr(l_ret_var, '#') - 1), l_ret_var);
+            end if;
+            exit;
+          end if;
+          l_guess_idx := l_guess_date_seed_vals.next(l_guess_idx);
+        end loop;
       end if;
     end if;
 
@@ -61,10 +141,10 @@ as
 
     return l_ret_var;
 
-    exception
+    /* exception
       when others then
         dbms_application_info.set_action(null);
-        raise;
+        raise; */
 
   end guess_data_generator;
 
@@ -280,6 +360,21 @@ as
           l_ret_var(l_ret_idx).builtin_logic_code := '
             l_bltin_' || l_ret_var(l_ret_idx).column_name || ' := ' || l_ret_var(l_ret_idx).builtin_function || '(l_bltin_' || l_ret_var(l_ret_idx).column_name || ', ''' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 1, '¤') || ''', ' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 2, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 3, '¤') || ');';
         end if;
+      elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '$' then
+        -- We have a reference list. Do not build as a real field, only generate and store
+        -- so we can reference a value from it, from generated field.
+        -- If the string is enclosed in square brackets, we take it as a fixed value list,
+        -- else the following string is treated as generator function and number of elements to
+        -- generate for the list, separated by the ¤ character.
+        l_ret_var(l_ret_idx).column_type := 'referencelist';
+        if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 2, 1) = '[' then
+          -- Fixed list. Set referencelist values to string between the square brackets.
+          l_ret_var(l_ret_idx).fixed_value := substr(util_random.ru_extract(l_tmp_column, 3, '#'), 3);
+          l_ret_var(l_ret_idx).fixed_value := substr(l_ret_var(l_ret_idx).fixed_value, 1, length(l_ret_var(l_ret_idx).fixed_value) - 1);
+        else
+          -- Generate the list at runtime. Define the code to do so.
+          null;
+        end if;
       else
         l_ret_var(l_ret_idx).column_type := 'generated';
         -- First check if we allow nulls. If the generator is surrounded by parentheses
@@ -356,6 +451,8 @@ as
 
     -- Working assumptions.
     l_is_unique             boolean := false;
+    l_str_start_len         number := 4;
+    l_str_stop_len          number := 20;
 
     cursor get_col_info is
       select * from user_tab_cols
@@ -437,41 +534,78 @@ as
           l_is_unique := false;
         end if;
 
-        l_guessed_generator := guess_data_generator(l_base_table_cols_info(i).data_type, l_base_table_cols_info(i).column_name);
+        l_guessed_generator := guess_data_generator(l_base_table_cols_info(i).data_type, l_base_table_cols_info(i).column_name, null, l_base_table_cols_info(i).low_value, l_base_table_cols_info(i).high_value);
         if l_base_table_cols_info(i).data_type = 'VARCHAR2' then
           l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type || '(' || l_base_table_cols_info(i).data_length || ')';
           if l_guessed_generator is null then
-            l_ret_var(l_curr_idx).generator := 'core_random.r_string';
-            l_ret_var(l_curr_idx).generator_args := 'core_random.r_natural('|| length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value)) ||', '|| length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).high_value)) ||') , ''abcdefghijklmnopqrstuvwxy''';
+            if l_base_table_cols_info(i).low_value = l_base_table_cols_info(i).high_value then
+              -- Seems the value of the column is unique.
+              -- Set the testdata generator to a fixed value that we choose here.
+              l_ret_var(l_curr_idx).column_type := 'fixed';
+              l_ret_var(l_curr_idx).fixed_value := core_random.r_string(length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value)), 'abcdefghijklmnopqrstuvwxy');
+            else
+              l_ret_var(l_curr_idx).generator := 'core_random.r_string';
+              if length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value)) is null then
+                l_str_start_len := 4;
+                l_str_stop_len := 20;
+              else
+                l_str_start_len := length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value));
+                l_str_stop_len := length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).high_value));
+              end if;
+              l_ret_var(l_curr_idx).generator_args := 'core_random.r_natural('|| l_str_start_len ||', '|| l_str_stop_len ||') , ''abcdefghijklmnopqrstuvwxy''';
+            end if;
           else
-            l_ret_var(l_curr_idx).generator := l_guessed_generator;
+            if instr(l_guessed_generator, '#') > 0 then
+              -- We have args for the generator as well.
+              l_ret_var(l_curr_idx).generator_args := substr(l_guessed_generator, instr(l_guessed_generator, '#') + 1);
+              dbms_output.put_line('Args: ' || l_ret_var(l_curr_idx).generator_args);
+              l_ret_var(l_curr_idx).generator := substr(l_guessed_generator, 1, instr(l_guessed_generator, '#') - 1);
+            else
+              l_ret_var(l_curr_idx).generator := l_guessed_generator;
+            end if;
           end if;
         elsif l_base_table_cols_info(i).data_type = 'NUMBER' then
           l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
-          if l_is_unique then
-            -- This is a unqiue number, so make it a builtin type.
-            l_ret_var(l_curr_idx).column_type := 'builtin';
-            l_ret_var(l_curr_idx).builtin_type := 'numiterate';
-            l_ret_var(l_curr_idx).builtin_function := 'util_random.ru_number_increment';
-            l_ret_var(l_curr_idx).builtin_startpoint := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value);
-            l_ret_var(l_curr_idx).builtin_increment := '1¤1';
-            -- Define code.
-            l_ret_var(l_curr_idx).builtin_define_code := '
-              l_bltin_' || l_ret_var(l_curr_idx).column_name || ' number := ' || l_ret_var(l_curr_idx).builtin_startpoint || ';';
-            -- Increment logic.
-            l_ret_var(l_curr_idx).builtin_logic_code := '
-              l_bltin_' || l_ret_var(l_curr_idx).column_name || ' := ' || l_ret_var(l_curr_idx).builtin_function || '(l_bltin_' || l_ret_var(l_curr_idx).column_name || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 1, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 2, '¤') || ');';
-          else
-            if l_guessed_generator is null then
+          if l_guessed_generator is null then
+            if l_is_unique then
+              -- This is a unqiue number, so make it a builtin type.
+              l_ret_var(l_curr_idx).column_type := 'builtin';
+              l_ret_var(l_curr_idx).builtin_type := 'numiterate';
+              l_ret_var(l_curr_idx).builtin_function := 'util_random.ru_number_increment';
+              l_ret_var(l_curr_idx).builtin_startpoint := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value);
+              l_ret_var(l_curr_idx).builtin_increment := '1¤1';
+              -- Define code.
+              l_ret_var(l_curr_idx).builtin_define_code := '
+                l_bltin_' || l_ret_var(l_curr_idx).column_name || ' number := ' || l_ret_var(l_curr_idx).builtin_startpoint || ';';
+              -- Increment logic.
+              l_ret_var(l_curr_idx).builtin_logic_code := '
+                l_bltin_' || l_ret_var(l_curr_idx).column_name || ' := ' || l_ret_var(l_curr_idx).builtin_function || '(l_bltin_' || l_ret_var(l_curr_idx).column_name || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 1, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 2, '¤') || ');';
+            else
               l_ret_var(l_curr_idx).generator := 'core_random.r_integer';
               l_ret_var(l_curr_idx).generator_args := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value) || ',' || utl_raw.cast_to_number(l_base_table_cols_info(i).high_value);
+            end if;
+          else
+            if instr(l_guessed_generator, '#') > 0 then
+              -- We have args for the generator as well.
+              l_ret_var(l_curr_idx).generator_args := substr(l_guessed_generator, instr(l_guessed_generator, '#') + 1);
+              l_ret_var(l_curr_idx).generator := substr(l_guessed_generator, 1, instr(l_guessed_generator, '#') - 1);
             else
               l_ret_var(l_curr_idx).generator := l_guessed_generator;
             end if;
           end if;
         elsif l_base_table_cols_info(i).data_type = 'DATE' then
-          l_ret_var(l_curr_idx).generator := 'time_random.r_date';
           l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
+          if l_guessed_generator is null then
+            l_ret_var(l_curr_idx).generator := 'time_random.r_date';
+          else
+            if instr(l_guessed_generator, '#') > 0 then
+              -- We have args for the generator as well.
+              l_ret_var(l_curr_idx).generator_args := substr(l_guessed_generator, instr(l_guessed_generator, '#') + 1);
+              l_ret_var(l_curr_idx).generator := substr(l_guessed_generator, 1, instr(l_guessed_generator, '#') - 1);
+            else
+              l_ret_var(l_curr_idx).generator := l_guessed_generator;
+            end if;
+          end if;
         else
           l_ret_var(l_curr_idx).generator := 'core_random.r_string';
           l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
@@ -479,7 +613,7 @@ as
 
         if l_base_table_cols_info(i).nullable = 'Y' and l_ret_var(l_curr_idx).column_type = 'generated' then
           if l_base_table_col_stats(l_curr_idx).num_nulls > 0 then
-            l_ret_var(l_curr_idx).generator_nullable := l_base_table_col_stats(l_curr_idx).num_nulls/(l_base_table_stats.num_rows/100);
+            l_ret_var(l_curr_idx).generator_nullable := round(l_base_table_col_stats(l_curr_idx).num_nulls/(l_base_table_stats.num_rows/100),2);
           end if;
         end if;
       end loop;
@@ -490,10 +624,10 @@ as
 
     return l_ret_var;
 
-    exception
+    /* exception
       when others then
         dbms_application_info.set_action(null);
-        raise;
+        raise; */
 
   end parse_cols_from_table;
 
@@ -509,6 +643,7 @@ as
     l_generator_pkg_head        varchar2(32000);
     l_generator_pkg_body        varchar2(32000);
     l_generator_columns         generator_columns;
+    l_generator_first_col       boolean := true;
 
   begin
 
@@ -533,10 +668,13 @@ as
         ';
 
         for i in 1..l_generator_columns.count loop
-          if i = 1 then
-            l_generator_pkg_head := l_generator_pkg_head || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
-          else
-            l_generator_pkg_head := l_generator_pkg_head || ', ' || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
+          if l_generator_columns(i).column_type != 'referencelist' then
+            if l_generator_first_col then
+              l_generator_pkg_head := l_generator_pkg_head || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
+              l_generator_first_col := false;
+            else
+              l_generator_pkg_head := l_generator_pkg_head || ', ' || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
+            end if;
           end if;
         end loop;
 
@@ -839,22 +977,24 @@ as
         l_generator_pkg_body := l_generator_pkg_body || '
           l_ret_var.' || l_generator_columns(i).column_name || ' := l_bltin_' || l_generator_columns(i).column_name || ';' || l_generator_columns(i).builtin_logic_code;
       else
+        if l_generator_columns(i).column_type != 'referencelist' then
         -- Check if we need to add arguments or not and if nullable is enabled.
-        if l_generator_columns(i).generator_nullable is not null then
-          if l_generator_columns(i).generator_args is not null then
-            l_generator_pkg_body := l_generator_pkg_body || '
-              case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || '); end case;';
+          if l_generator_columns(i).generator_nullable is not null then
+            if l_generator_columns(i).generator_args is not null then
+              l_generator_pkg_body := l_generator_pkg_body || '
+                case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || '); end case;';
+            else
+              l_generator_pkg_body := l_generator_pkg_body || '
+                case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '; end case;';
+            end if;
           else
-            l_generator_pkg_body := l_generator_pkg_body || '
-              case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '; end case;';
-          end if;
-        else
-          if l_generator_columns(i).generator_args is not null then
-            l_generator_pkg_body := l_generator_pkg_body || '
-              l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || ');';
-          else
-            l_generator_pkg_body := l_generator_pkg_body || '
-              l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+            if l_generator_columns(i).generator_args is not null then
+              l_generator_pkg_body := l_generator_pkg_body || '
+                l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || ');';
+            else
+              l_generator_pkg_body := l_generator_pkg_body || '
+                l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+            end if;
           end if;
         end if;
       end if;
@@ -877,10 +1017,10 @@ as
 
     dbms_application_info.set_action(null);
 
-    exception
+    /* exception
       when others then
         dbms_application_info.set_action(null);
-        raise;
+        raise; */
 
   end generator_create;
 
