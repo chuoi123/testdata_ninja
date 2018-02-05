@@ -150,6 +150,7 @@ as
 
   function parse_generator_cols (
     column_metadata             in        varchar2
+    , column_order              out       topological_ninja.topo_number_list
   )
   return generator_columns
 
@@ -164,6 +165,9 @@ as
     l_reference_replace     number;
     l_tmp_pkg_name          varchar2(128);
     l_tmp_fnc_name          varchar2(128);
+
+    l_dependencies          topological_ninja.topo_dependency_list;
+    l_all_cols_sorted       topological_ninja.topo_number_list := topological_ninja.topo_number_list();
 
     cursor get_inputs(pkg_name varchar2, fnc_name varchar2) is
       select
@@ -186,6 +190,8 @@ as
 
     -- First extract generator to column id and inputs to generators.
     for i in 1..l_column_count loop
+      l_all_cols_sorted.extend(1);
+      l_all_cols_sorted(l_all_cols_sorted.count) := i;
       l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
       if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) not in ('£', '~', '^')  then
         -- We have a generated column. Save the generator name, for use in auto input reference.
@@ -217,9 +223,17 @@ as
             l_input_track(i)(l_input_track(i).count).input_position := y.position;
             l_input_track(i)(l_input_track(i).count).draw_from_col := l_output_track(y.argument_name);
             l_input_track(i)(l_input_track(i).count).draw_from_col_num := l_output_order_track(l_tmp_fnc_name);
+            -- my_dependencies(l_input_track(i)(l_input_track(i).count).input_position) := l_input_track(i)(l_input_track(i).count).draw_from_col_num;
+            l_dependencies(l_output_order_track(l_tmp_fnc_name)) := y.position;
+            -- dbms_output.put_line(l_tmp_fnc_name || '(' || l_output_order_track(l_tmp_fnc_name) || ') is dependent on ' || l_output_track(y.argument_name) || '(' || l_output_track(l_tmp_fnc_name) || ')');
           end if;
         end loop;
       end if;
+    end loop;
+
+    column_order := topological_ninja.f_s(dependency_list => l_dependencies, full_list_num => l_all_cols_sorted);
+    for i in 1..column_order.count loop
+      dbms_output.put_line('#' || i || ': ' || column_order(i));
     end loop;
 
     for i in 1..l_column_count loop
@@ -455,7 +469,7 @@ as
     l_str_stop_len          number := 20;
 
     cursor get_col_info is
-      select * from user_tab_cols
+      select * from all_tab_cols
       where table_name = upper(tab_name)
       order by column_id;
 
@@ -487,6 +501,8 @@ as
 
     l_base_table_cons_info          cons_list_tab := cons_list_tab();
 
+    l_all_meta                      main_tab_meta;
+
   begin
 
     dbms_application_info.set_action('parse_cols_from_table');
@@ -495,127 +511,57 @@ as
       -- The table exists, and if not this will throw exception.
       -- Get all the current information we have on the table into variables
       -- for use in generating a format as close to real life as possible.
+      l_all_meta.table_name := upper(tab_name);
       -- BASE INFO
-      select * into l_base_table_info from user_tables where table_name = upper(tab_name);
+      select * into l_all_meta.table_base_data from all_tables where table_name = upper(tab_name);
+      l_all_meta.table_columns := main_tab_cols();
       for i in get_col_info loop
-        l_base_table_cols_info.extend(1);
-        l_base_table_cols_info(l_base_table_cols_info.count) := i;
+        l_all_meta.table_columns.extend(1);
+        l_all_meta.table_columns(l_all_meta.table_columns.count).column_name := i.column_name;
+        l_all_meta.table_columns(l_all_meta.table_columns.count).column_type := i.data_type;
+        l_all_meta.table_columns(l_all_meta.table_columns.count).column_base_data := i;
+        select * into l_all_meta.table_columns(l_all_meta.table_columns.count).column_base_stats
+        from all_tab_col_statistics
+        where table_name = upper(tab_name)
+        and column_name = i.column_name;
       end loop;
       -- STATISTICS INFO
-      select * into l_base_table_stats from user_tab_statistics where table_name = upper(tab_name);
-      for i in get_col_stats_info loop
-        l_base_table_col_stats.extend(1);
-        l_base_table_col_stats(l_base_table_col_stats.count) := i;
-      end loop;
+      select * into l_all_meta.table_base_stats from all_tab_statistics where table_name = upper(tab_name);
       -- CONSTRAINTS INFO
-      for i in get_tab_constraints loop
+      /* for i in get_tab_constraints loop
         l_base_table_cons_info.extend(1);
         l_base_table_cons_info(l_base_table_cons_info.count) := i;
-      end loop;
+      end loop; */
 
-      for i in 1..l_base_table_cols_info.count loop
+      -- NEW WAY
+      testdata_data_infer.infer_generators(metadata => l_all_meta);
+
+      -- Loop over all the columns.
+      for i in 1..l_all_meta.table_columns.count loop
+        -- First extend
         l_ret_var.extend(1);
-        l_curr_idx := l_ret_var.count;
 
-        -- Find col stats index.
-        for y in 1..l_base_table_col_stats.count loop
-          if l_base_table_col_stats(y).column_name = l_base_table_cols_info(i).column_name then
-            l_curr_stats_idx := y;
-            exit;
+        -- Base column settings.
+        l_ret_var(i).column_name := l_all_meta.table_columns(i).column_name;
+        l_ret_var(i).column_type := l_all_meta.table_columns(i).inf_col_type;
+
+        -- Data type
+        case l_all_meta.table_columns(i).column_type
+          when 'VARCHAR2' then l_ret_var(i).data_type := l_all_meta.table_columns(i).column_base_data.data_type || '(' || l_all_meta.table_columns(i).column_base_data.data_length || ')';
+          else l_ret_var(i).data_type := l_all_meta.table_columns(i).column_base_data.data_type;
+        end case;
+
+        -- Set the data generator values.
+        if l_ret_var(i).column_type = 'generated' then
+          l_ret_var(i).generator := l_all_meta.table_columns(i).inf_col_generator;
+          l_ret_var(i).generator_args := l_all_meta.table_columns(i).inf_col_generator_args;
+          if l_all_meta.table_columns(i).inf_col_generator_nullable is not null then
+            l_ret_var(i).generator_nullable := l_all_meta.table_columns(i).inf_col_generator_nullable;
           end if;
-        end loop;
-
-        l_ret_var(l_curr_idx).column_name := l_base_table_cols_info(i).column_name;
-        l_ret_var(l_curr_idx).column_type := 'generated';
-        -- Set some working assumptions.
-        if l_base_table_stats.num_rows = l_base_table_col_stats(l_curr_stats_idx).num_distinct then
-          l_is_unique := true;
-        else
-          l_is_unique := false;
+        elsif l_ret_var(i).column_type = 'fixed' then
+          l_ret_var(i).fixed_value := l_all_meta.table_columns(i).inf_fixed_value;
         end if;
 
-        l_guessed_generator := guess_data_generator(l_base_table_cols_info(i).data_type, l_base_table_cols_info(i).column_name, null, l_base_table_cols_info(i).low_value, l_base_table_cols_info(i).high_value);
-        if l_base_table_cols_info(i).data_type = 'VARCHAR2' then
-          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type || '(' || l_base_table_cols_info(i).data_length || ')';
-          if l_guessed_generator is null then
-            if l_base_table_cols_info(i).low_value = l_base_table_cols_info(i).high_value then
-              -- Seems the value of the column is unique.
-              -- Set the testdata generator to a fixed value that we choose here.
-              l_ret_var(l_curr_idx).column_type := 'fixed';
-              l_ret_var(l_curr_idx).fixed_value := core_random.r_string(length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value)), 'abcdefghijklmnopqrstuvwxy');
-            else
-              l_ret_var(l_curr_idx).generator := 'core_random.r_string';
-              if length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value)) is null then
-                l_str_start_len := 4;
-                l_str_stop_len := 20;
-              else
-                l_str_start_len := length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).low_value));
-                l_str_stop_len := length(utl_raw.cast_to_varchar2(l_base_table_cols_info(i).high_value));
-              end if;
-              l_ret_var(l_curr_idx).generator_args := 'core_random.r_natural('|| l_str_start_len ||', '|| l_str_stop_len ||') , ''abcdefghijklmnopqrstuvwxy''';
-            end if;
-          else
-            if instr(l_guessed_generator, '#') > 0 then
-              -- We have args for the generator as well.
-              l_ret_var(l_curr_idx).generator_args := substr(l_guessed_generator, instr(l_guessed_generator, '#') + 1);
-              dbms_output.put_line('Args: ' || l_ret_var(l_curr_idx).generator_args);
-              l_ret_var(l_curr_idx).generator := substr(l_guessed_generator, 1, instr(l_guessed_generator, '#') - 1);
-            else
-              l_ret_var(l_curr_idx).generator := l_guessed_generator;
-            end if;
-          end if;
-        elsif l_base_table_cols_info(i).data_type = 'NUMBER' then
-          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
-          if l_guessed_generator is null then
-            if l_is_unique then
-              -- This is a unqiue number, so make it a builtin type.
-              l_ret_var(l_curr_idx).column_type := 'builtin';
-              l_ret_var(l_curr_idx).builtin_type := 'numiterate';
-              l_ret_var(l_curr_idx).builtin_function := 'util_random.ru_number_increment';
-              l_ret_var(l_curr_idx).builtin_startpoint := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value);
-              l_ret_var(l_curr_idx).builtin_increment := '1¤1';
-              -- Define code.
-              l_ret_var(l_curr_idx).builtin_define_code := '
-                l_bltin_' || l_ret_var(l_curr_idx).column_name || ' number := ' || l_ret_var(l_curr_idx).builtin_startpoint || ';';
-              -- Increment logic.
-              l_ret_var(l_curr_idx).builtin_logic_code := '
-                l_bltin_' || l_ret_var(l_curr_idx).column_name || ' := ' || l_ret_var(l_curr_idx).builtin_function || '(l_bltin_' || l_ret_var(l_curr_idx).column_name || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 1, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_curr_idx).builtin_increment, 2, '¤') || ');';
-            else
-              l_ret_var(l_curr_idx).generator := 'core_random.r_integer';
-              l_ret_var(l_curr_idx).generator_args := utl_raw.cast_to_number(l_base_table_cols_info(i).low_value) || ',' || utl_raw.cast_to_number(l_base_table_cols_info(i).high_value);
-            end if;
-          else
-            if instr(l_guessed_generator, '#') > 0 then
-              -- We have args for the generator as well.
-              l_ret_var(l_curr_idx).generator_args := substr(l_guessed_generator, instr(l_guessed_generator, '#') + 1);
-              l_ret_var(l_curr_idx).generator := substr(l_guessed_generator, 1, instr(l_guessed_generator, '#') - 1);
-            else
-              l_ret_var(l_curr_idx).generator := l_guessed_generator;
-            end if;
-          end if;
-        elsif l_base_table_cols_info(i).data_type = 'DATE' then
-          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
-          if l_guessed_generator is null then
-            l_ret_var(l_curr_idx).generator := 'time_random.r_date';
-          else
-            if instr(l_guessed_generator, '#') > 0 then
-              -- We have args for the generator as well.
-              l_ret_var(l_curr_idx).generator_args := substr(l_guessed_generator, instr(l_guessed_generator, '#') + 1);
-              l_ret_var(l_curr_idx).generator := substr(l_guessed_generator, 1, instr(l_guessed_generator, '#') - 1);
-            else
-              l_ret_var(l_curr_idx).generator := l_guessed_generator;
-            end if;
-          end if;
-        else
-          l_ret_var(l_curr_idx).generator := 'core_random.r_string';
-          l_ret_var(l_curr_idx).data_type := l_base_table_cols_info(i).data_type;
-        end if;
-
-        if l_base_table_cols_info(i).nullable = 'Y' and l_ret_var(l_curr_idx).column_type = 'generated' then
-          if l_base_table_col_stats(l_curr_idx).num_nulls > 0 then
-            l_ret_var(l_curr_idx).generator_nullable := round(l_base_table_col_stats(l_curr_idx).num_nulls/(l_base_table_stats.num_rows/100),2);
-          end if;
-        end if;
       end loop;
 
     end if;
@@ -644,13 +590,15 @@ as
     l_generator_pkg_body        varchar2(32000);
     l_generator_columns         generator_columns;
     l_generator_first_col       boolean := true;
+    l_column_order              topological_ninja.topo_number_list := topological_ninja.topo_number_list();
+    l_build_idx                 number;
 
   begin
 
     dbms_application_info.set_action('generator_create');
 
     if generator_table is null and generator_format is not null then
-      l_generator_columns := parse_generator_cols(generator_format);
+      l_generator_columns := parse_generator_cols(generator_format, l_column_order);
     elsif generator_format is null and generator_table is not null then
       l_generator_columns := parse_cols_from_table(generator_table);
     end if;
@@ -961,39 +909,45 @@ as
     l_generator_pkg_body := l_generator_pkg_body || '
           for x in generator loop';
 
+    -- l_column_order(i) is the index.
     for i in 1..l_generator_columns.count loop
-      if l_generator_columns(i).column_type = 'reference field' then
+      if l_column_order.count > 0 then
+        l_build_idx := l_column_order(i);
+      else
+        l_build_idx := i;
+      end if;
+      if l_generator_columns(l_build_idx).column_type = 'reference field' then
         -- Referenced field. Run ref logic.
-        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_logic_code;
-      elsif l_generator_columns(i).column_type = 'fixed' then
-        if l_generator_columns(i).data_type = 'number' then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(l_build_idx).ref_logic_code;
+      elsif l_generator_columns(l_build_idx).column_type = 'fixed' then
+        if l_generator_columns(l_build_idx).data_type = 'number' then
           l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).fixed_value || ';';
+            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).fixed_value || ';';
         else
           l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(i).column_name || ' := ''' || l_generator_columns(i).fixed_value || ''';';
+            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ''' || l_generator_columns(l_build_idx).fixed_value || ''';';
         end if;
-      elsif l_generator_columns(i).column_type = 'builtin' then
+      elsif l_generator_columns(l_build_idx).column_type = 'builtin' then
         l_generator_pkg_body := l_generator_pkg_body || '
-          l_ret_var.' || l_generator_columns(i).column_name || ' := l_bltin_' || l_generator_columns(i).column_name || ';' || l_generator_columns(i).builtin_logic_code;
+          l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := l_bltin_' || l_generator_columns(l_build_idx).column_name || ';' || l_generator_columns(l_build_idx).builtin_logic_code;
       else
-        if l_generator_columns(i).column_type != 'referencelist' then
+        if l_generator_columns(l_build_idx).column_type != 'referencelist' then
         -- Check if we need to add arguments or not and if nullable is enabled.
-          if l_generator_columns(i).generator_nullable is not null then
-            if l_generator_columns(i).generator_args is not null then
+          if l_generator_columns(l_build_idx).generator_nullable is not null then
+            if l_generator_columns(l_build_idx).generator_args is not null then
               l_generator_pkg_body := l_generator_pkg_body || '
-                case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || '); end case;';
+                case when core_random.r_bool('|| l_generator_columns(l_build_idx).generator_nullable ||') then l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := null; else l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '(' || l_generator_columns(l_build_idx).generator_args || '); end case;';
             else
               l_generator_pkg_body := l_generator_pkg_body || '
-                case when core_random.r_bool('|| l_generator_columns(i).generator_nullable ||') then l_ret_var.' || l_generator_columns(i).column_name || ' := null; else l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '; end case;';
+                case when core_random.r_bool('|| l_generator_columns(l_build_idx).generator_nullable ||') then l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := null; else l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '; end case;';
             end if;
           else
-            if l_generator_columns(i).generator_args is not null then
+            if l_generator_columns(l_build_idx).generator_args is not null then
               l_generator_pkg_body := l_generator_pkg_body || '
-                l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || '(' || l_generator_columns(i).generator_args || ');';
+                l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '(' || l_generator_columns(l_build_idx).generator_args || ');';
             else
               l_generator_pkg_body := l_generator_pkg_body || '
-                l_ret_var.' || l_generator_columns(i).column_name || ' := ' || l_generator_columns(i).generator || ';';
+                l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || ';';
             end if;
           end if;
         end if;

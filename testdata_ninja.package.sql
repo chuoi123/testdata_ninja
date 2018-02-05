@@ -11,7 +11,36 @@ as
 
   -- Globals
   g_default_generator_rows        number := 10;
-  g_default_population_size       number := 0.001;
+
+  type col_assumptions is record (
+    col_is_unique                 number
+    , col_all_null                number
+    , col_low_high_same           number
+  );
+
+  type main_tab_col_meta is record (
+    column_name                   varchar2(128)
+    , column_type                 varchar2(128)
+    , column_base_data            all_tab_cols%rowtype
+    , column_base_stats           all_tab_col_statistics%rowtype
+    , column_assumptions          col_assumptions
+    , inf_col_domain              varchar2(128)
+    , inf_col_change_pattern      varchar2(128)
+    , inf_col_type                varchar2(128)
+    , inf_col_generator           varchar2(512)
+    , inf_col_generator_args      varchar2(4000)
+    , inf_col_generator_nullable  number
+    , inf_fixed_value             varchar2(4000)
+  );
+  type main_tab_cols is table of main_tab_col_meta;
+
+  type main_tab_meta is record (
+    table_name                    varchar2(128)
+    , table_base_data             all_tables%rowtype
+    , table_base_stats            all_tab_statistics%rowtype
+    , inf_table_domain            varchar2(128)
+    , table_columns               main_tab_cols
+  );
 
   type generator_column_rec is record (
     column_name           varchar2(500)
@@ -44,6 +73,7 @@ as
   */
   function parse_generator_cols (
     column_metadata             in        varchar2
+    , column_order              out       topological_ninja.topo_number_list
   )
   return generator_columns;
 
