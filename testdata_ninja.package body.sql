@@ -560,6 +560,13 @@ as
           end if;
         elsif l_ret_var(i).column_type = 'fixed' then
           l_ret_var(i).fixed_value := l_all_meta.table_columns(i).inf_fixed_value;
+        elsif l_ret_var(i).column_type = 'builtin' then
+          l_ret_var(i).builtin_type := l_all_meta.table_columns(i).inf_builtin_type;
+          l_ret_var(i).builtin_function := l_all_meta.table_columns(i).inf_builtin_function;
+          l_ret_var(i).builtin_startpoint := l_all_meta.table_columns(i).inf_builtin_startpoint;
+          l_ret_var(i).builtin_increment := l_all_meta.table_columns(i).inf_builtin_increment;
+          l_ret_var(i).builtin_define_code := l_all_meta.table_columns(i).inf_builtin_define_code;
+          l_ret_var(i).builtin_logic_code := l_all_meta.table_columns(i).inf_builtin_logic_code;
         end if;
 
       end loop;

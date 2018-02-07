@@ -31,6 +31,12 @@ as
     , inf_col_generator_args      varchar2(4000)
     , inf_col_generator_nullable  number
     , inf_fixed_value             varchar2(4000)
+    , inf_builtin_type            varchar2(100)
+    , inf_builtin_function        varchar2(100)
+    , inf_builtin_startpoint      varchar2(100)
+    , inf_builtin_increment       varchar2(100)
+    , inf_builtin_define_code     varchar2(4000)
+    , inf_builtin_logic_code      varchar2(4000)
   );
   type main_tab_cols is table of main_tab_col_meta;
 

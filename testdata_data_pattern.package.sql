@@ -27,5 +27,14 @@ as
     , col_idx             in                  number
   );
 
+  /** Try and guess pattern from data instead of known pattern.
+  * @author Morten Egan
+  * @param metadata The metadata
+  */
+  procedure guess_pattern_in_col (
+    metadata              in out nocopy       testdata_ninja.main_tab_meta
+    , col_idx             in                  number
+  );
+
 end testdata_data_pattern;
 /

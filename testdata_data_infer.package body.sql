@@ -108,10 +108,21 @@ as
     end if;
 
     if metadata.table_columns(col_idx).inf_col_generator is null then
+      -- If we have not yet infered a column generator (based on simple naming of columns and known format strings)
+      -- Let us see if we can guess from patterns in the data.
+      testdata_data_pattern.guess_pattern_in_col(metadata, col_idx);
+    end if;
+
+    if metadata.table_columns(col_idx).inf_col_generator is null then
       -- We've reached the end without a hit in the infer. Let us run some other checks.
       if l_low_val = l_high_val then
         metadata.table_columns(col_idx).inf_col_type := 'fixed';
-        metadata.table_columns(col_idx).inf_fixed_value := core_random.r_string(length(l_low_val), 'abcdefghijklmnopqrstuvwxy');
+        if l_low_val = upper(l_low_val) then
+          -- Value is fixed AND uppercase
+          metadata.table_columns(col_idx).inf_fixed_value := upper(core_random.r_string(length(l_low_val), 'abcdefghijklmnopqrstuvwxy'));
+        else
+          metadata.table_columns(col_idx).inf_fixed_value := core_random.r_string(length(l_low_val), 'abcdefghijklmnopqrstuvwxy');
+        end if;
       else
         -- We could not guess anything about this column. Set to default text string.
         metadata.table_columns(col_idx).inf_col_type := 'generated';
@@ -161,12 +172,28 @@ as
     end loop;
 
     if metadata.table_columns(col_idx).inf_col_generator is null then
-      -- We've reached the end without a hit in the infer. Set to default.
-      metadata.table_columns(col_idx).inf_col_domain := 'Number';
-      metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
-      metadata.table_columns(col_idx).inf_col_type := 'generated';
-      metadata.table_columns(col_idx).inf_col_generator := 'core_random.r_integer';
-      metadata.table_columns(col_idx).inf_col_generator_args := nvl(l_low_val, 4) || ',' || nvl(l_high_val, 10);
+      -- Check for built-ins
+      if metadata.table_columns(col_idx).column_assumptions.col_is_unique = 1 then
+        -- This is a unqiue number, so make it a builtin type.
+        metadata.table_columns(col_idx).inf_col_domain := 'Number';
+        metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
+        metadata.table_columns(col_idx).inf_col_type := 'builtin';
+        metadata.table_columns(col_idx).inf_builtin_type := 'numiterate';
+        metadata.table_columns(col_idx).inf_builtin_function := 'util_random.ru_number_increment';
+        metadata.table_columns(col_idx).inf_builtin_startpoint := l_low_val; -- TODO Should be a "rescramble" so not the same as prod.
+        metadata.table_columns(col_idx).inf_builtin_increment := '1¤1'; -- TODO Should do pattern and check the increment.
+        metadata.table_columns(col_idx).inf_builtin_define_code := '
+          l_bltin_' || metadata.table_columns(col_idx).column_name || ' number := ' || metadata.table_columns(col_idx).inf_builtin_startpoint || ';';
+        metadata.table_columns(col_idx).inf_builtin_logic_code := '
+          l_bltin_' || metadata.table_columns(col_idx).column_name || ' := ' || metadata.table_columns(col_idx).inf_builtin_function || '(l_bltin_' || metadata.table_columns(col_idx).column_name || ', ' || util_random.ru_extract(metadata.table_columns(col_idx).inf_builtin_increment, 1, '¤') || ', ' || util_random.ru_extract(metadata.table_columns(col_idx).inf_builtin_increment, 2, '¤') || ');';
+      else
+        -- We've reached the end without a hit in the infer. Set to default.
+        metadata.table_columns(col_idx).inf_col_domain := 'Number';
+        metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
+        metadata.table_columns(col_idx).inf_col_type := 'generated';
+        metadata.table_columns(col_idx).inf_col_generator := 'core_random.r_integer';
+        metadata.table_columns(col_idx).inf_col_generator_args := nvl(l_low_val, 4) || ',' || nvl(l_high_val, 10);
+      end if;
     end if;
 
     dbms_application_info.set_action(null);

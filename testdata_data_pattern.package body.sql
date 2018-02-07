@@ -93,6 +93,120 @@ as
 
   end find_known_pattern_in_col;
 
+  procedure guess_pattern_in_col (
+    metadata              in out nocopy       testdata_ninja.main_tab_meta
+    , col_idx             in                  number
+  )
+
+  as
+
+    type row_pattern_rec is record (
+      col_val                     varchar2(4000)
+      , word_count                number
+      , max_word_count            number
+      , min_word_count            number
+      , int_count                 number
+      , has_caps                  number
+      , caps_count                number
+      , low_count                 number
+      , seperator_count           number
+      , seperator_avg_count       number
+      , seperator_min_count       number
+      , seperator_max_count       number
+      , all_count                 number
+      , avg_count_by_seperator    number
+      , min_count_by_seperator    number
+      , max_count_by_seperator    number
+      , patternized               varchar2(4000)
+      , seperator_value           varchar2(100)
+    );
+    type sample_data_tab is table of row_pattern_rec;
+    l_sample_data         sample_data_tab := sample_data_tab();
+    l_sample_data_cursor  sys_refcursor;
+    l_sample_size         number;
+
+    l_only_one_word       boolean := false;
+    l_id_word_pattern     boolean := false;
+
+  begin
+
+    dbms_application_info.set_action('guess_pattern_in_col');
+
+    -- Find the sample size for the cursor. Never fetch more than testdata_data_infer.g_column_value_max_sample_size
+    -- and by default we fetch 1% if table rowcount is larger than 200 and .
+    -- Else we fetch the entire table.
+    if round(metadata.table_base_stats.num_rows/100) > testdata_data_infer.g_column_value_max_sample_size then
+      -- calculate the percent of 1000 rows.
+      l_sample_size := ((1000/metadata.table_base_stats.num_rows*100)/100);
+    elsif metadata.table_base_stats.num_rows > 200 then
+      l_sample_size := 1;
+    else
+      -- Might as well fetch entire table.
+      l_sample_size := 99;
+    end if;
+
+    open l_sample_data_cursor for 'select
+        '|| metadata.table_columns(col_idx).column_name ||'
+        , wcount
+        , max(wcount) over () as maxwcount
+        , min(wcount) over () as minwcount
+        , intcount
+        , case
+            when capcount > 0 then 1
+            else 0
+          end hascaps
+        , capcount
+        , lowcount
+        , sepcount
+        , round(avg(sepcount) over ()) as avesepcount
+        , min(sepcount) over () as minsepcount
+        , max(sepcount) over () as maxsepcount
+        , allcount
+        , round(avg(allcount) over(partition by sepcount)) as avgallcountbysep
+        , min(allcount) over (partition by sepcount) as minallcountbysep
+        , max(allcount) over (partition by sepcount) as maxallcountbysep
+        , case
+            when wcount = 1 then regexp_replace(regexp_replace('|| metadata.table_columns(col_idx).column_name ||', ''\d'', ''#''), ''[a-zA-Z]'', ''?'')
+            else null
+          end patternized
+        , case
+            when (wcount = 1 and sepcount > 0) then regexp_substr('|| metadata.table_columns(col_idx).column_name ||', ''[-_/\|]'')
+            else null
+          end sepvalue
+      from (
+        select
+          '|| metadata.table_columns(col_idx).column_name ||'
+          , regexp_count('|| metadata.table_columns(col_idx).column_name ||', ''\w+'') as wcount
+          , regexp_count('|| metadata.table_columns(col_idx).column_name ||', ''\d'') as intcount
+          , regexp_count('|| metadata.table_columns(col_idx).column_name ||', ''[A-Z]'') as capcount
+          , regexp_count('|| metadata.table_columns(col_idx).column_name ||', ''[a-z]'') as lowcount
+          , regexp_count('|| metadata.table_columns(col_idx).column_name ||', ''[-_/\|]'') as sepcount
+          , length('|| metadata.table_columns(col_idx).column_name ||') as allcount
+        from ' || metadata.table_name || ' sample(' || l_sample_size || ')
+      )';
+    fetch l_sample_data_cursor bulk collect into l_sample_data;
+
+    for i in 1..l_sample_data.count loop
+      -- For the first row let us set some base assumptions.
+      if i = 1 then
+        if l_sample_data(i).max_word_count = 1 then
+          l_only_one_word := true;
+        end if;
+        if l_sample_data(i).seperator_avg_count > 0 then
+          l_id_word_pattern := true;
+        end if;
+      end if;
+    end loop;
+
+    dbms_application_info.set_action(null);
+
+    exception
+      when others then
+        dbms_application_info.set_action(null);
+        raise;
+
+  end guess_pattern_in_col;
+
 begin
 
   dbms_application_info.set_client_info('testdata_data_pattern');
