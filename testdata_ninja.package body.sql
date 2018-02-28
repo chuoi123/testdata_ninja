@@ -727,6 +727,8 @@ as
               level <= generator_count;
 
         begin
+
+          dbms_random.seed(predictable_key);
     ';
 
     for i in 1..l_generator_columns.count loop
