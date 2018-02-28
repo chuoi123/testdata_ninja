@@ -9,6 +9,17 @@ as
   */
   npg_version         varchar2(250) := '0.0.1';
 
+  -- Keep track of input values.
+  type track_input_rec is record (
+    input_position        number
+    , input_name          varchar2(128)
+    , draw_from_col       varchar2(128)
+    , draw_from_col_num   number
+  );
+  type track_input_tab1 is table of track_input_rec;
+  type track_input_tab2 is table of track_input_tab1;
+  g_input_track           track_input_tab2;
+
   -- Globals
   g_default_generator_rows        number := 10;
 

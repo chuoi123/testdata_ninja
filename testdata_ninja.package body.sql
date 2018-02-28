@@ -8,16 +8,6 @@ as
   -- Keep track of output order for topo sort.
   type track_output_ord_tab is table of number index by varchar2(128);
   l_output_order_track    track_output_ord_tab;
-  -- Keep track of input values.
-  type track_input_rec is record (
-    input_position        number
-    , input_name          varchar2(128)
-    , draw_from_col       varchar2(128)
-    , draw_from_col_num   number
-  );
-  type track_input_tab1 is table of track_input_rec;
-  type track_input_tab2 is table of track_input_tab1;
-  l_input_track           track_input_tab2;
 
   function guess_data_generator (
     data_type                   in        varchar2
@@ -201,11 +191,11 @@ as
       end if;
     end loop;
 
-    l_input_track := track_input_tab2();
-    l_input_track.extend(l_column_count);
+    g_input_track := track_input_tab2();
+    g_input_track.extend(l_column_count);
     -- initialize sub table type.
-    for i in 1..l_input_track.count() loop
-      l_input_track(i) := track_input_tab1();
+    for i in 1..g_input_track.count() loop
+      g_input_track(i) := track_input_tab1();
     end loop;
 
     -- Next we map input parameters to generators.
@@ -218,12 +208,12 @@ as
         l_tmp_fnc_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') + 1));
         for y in get_inputs(l_tmp_pkg_name, l_tmp_fnc_name) loop
           if l_output_track.exists(y.argument_name) then
-            l_input_track(i).extend(1);
-            l_input_track(i)(l_input_track(i).count).input_name := y.argument_name;
-            l_input_track(i)(l_input_track(i).count).input_position := y.position;
-            l_input_track(i)(l_input_track(i).count).draw_from_col := l_output_track(y.argument_name);
-            l_input_track(i)(l_input_track(i).count).draw_from_col_num := l_output_order_track(l_tmp_fnc_name);
-            -- my_dependencies(l_input_track(i)(l_input_track(i).count).input_position) := l_input_track(i)(l_input_track(i).count).draw_from_col_num;
+            g_input_track(i).extend(1);
+            g_input_track(i)(g_input_track(i).count).input_name := y.argument_name;
+            g_input_track(i)(g_input_track(i).count).input_position := y.position;
+            g_input_track(i)(g_input_track(i).count).draw_from_col := l_output_track(y.argument_name);
+            g_input_track(i)(g_input_track(i).count).draw_from_col_num := l_output_order_track(l_tmp_fnc_name);
+            -- my_dependencies(g_input_track(i)(g_input_track(i).count).input_position) := g_input_track(i)(g_input_track(i).count).draw_from_col_num;
             l_dependencies(l_output_order_track(l_tmp_fnc_name)) := y.position;
             -- dbms_output.put_line(l_tmp_fnc_name || '(' || l_output_order_track(l_tmp_fnc_name) || ') is dependent on ' || l_output_track(y.argument_name) || '(' || l_output_track(l_tmp_fnc_name) || ')');
           end if;
@@ -245,192 +235,22 @@ as
       l_ret_var(l_ret_idx).data_type := util_random.ru_extract(l_tmp_column, 2, '#');
       -- Check generator type.
       if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '£' then
-        -- This is a reference field.
-        l_ret_var(l_ret_idx).column_type := 'reference field';
-        l_tmp_reference := util_random.ru_extract(l_tmp_column, 3, '#');
-        l_ret_var(l_ret_idx).reference_table := substr(util_random.ru_extract(l_tmp_reference, 1, '¤'), 2);
-        l_ret_var(l_ret_idx).reference_column := util_random.ru_extract(l_tmp_reference, 2, '¤');
-        l_ret_var(l_ret_idx).ref_dist_type := util_random.ru_extract(l_tmp_reference, 3, '¤');
-        if length(util_random.ru_extract(l_tmp_reference, 4, '¤')) != length(l_tmp_reference) then
-          l_ret_var(l_ret_idx).ref_dist_default := util_random.ru_extract(l_tmp_reference, 4, '¤');
-        else
-          if l_ret_var(l_ret_idx).ref_dist_type = 'simple' then
-            l_ret_var(l_ret_idx).ref_dist_default := '1';
-          elsif l_ret_var(l_ret_idx).ref_dist_type = 'range' then
-            l_ret_var(l_ret_idx).ref_dist_default := '1,5';
-          elsif l_ret_var(l_ret_idx).ref_dist_type = 'weighted' then
-            l_ret_var(l_ret_idx).ref_dist_default := '2~0.5^4~0.5';
-          end if;
-        end if;
-        -- Build the definition code for the reference field.
-        l_ret_var(l_ret_idx).ref_define_code := '
-          type t_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_c_tab is table of number index by varchar2(4000);
-          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list t_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_c_tab;
-          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx varchar2(4000);';
-
-        if l_ret_var(l_ret_idx).ref_dist_type = 'simple' then
-          l_ret_var(l_ret_idx).ref_define_code := l_ret_var(l_ret_idx).ref_define_code ||'
-            l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := round(generator_count/dist_' || substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||');';
-        elsif l_ret_var(l_ret_idx).ref_dist_type in ('range', 'weighted') then
-          l_ret_var(l_ret_idx).ref_define_code := l_ret_var(l_ret_idx).ref_define_code ||'
-            l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := generator_count;
-            l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := 0;
-            l_ref_min_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := substr(dist_'|| substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||', 1, instr(dist_'|| substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||', '','') - 1);
-            l_ref_max_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' number := substr(dist_'|| substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||', instr(dist_'|| substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||', '','') + 1);';
-        end if;
-        l_ret_var(l_ret_idx).ref_define_code := l_ret_var(l_ret_idx).ref_define_code ||'
-          cursor c_ref_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||'(dist_in number) is
-            select ' || l_ret_var(l_ret_idx).reference_column || ' as ref_dist_col
-            from (
-              select ' || l_ret_var(l_ret_idx).reference_column || '
-              from ' || l_ret_var(l_ret_idx).reference_table || '
-              order by dbms_random.value
-            )
-            where rownum <= dist_in;
-        ';
-        -- Now we build the loading of the reference data code.
-        l_ret_var(l_ret_idx).ref_loader_code := '
-          -- Load reference data cursors to lists
-          for i in c_ref_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ') loop';
-        if l_ret_var(l_ret_idx).ref_dist_type = 'simple' then
-          l_ret_var(l_ret_idx).ref_loader_code := l_ret_var(l_ret_idx).ref_loader_code || '
-            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := dist_'|| substr(l_ret_var(l_ret_idx).column_name, 1, 15) ||';
-          ';
-        elsif l_ret_var(l_ret_idx).ref_dist_type in ('range', 'weighted') then
-          -- For range we do a r_natural based on input. Always keeping track of total
-          -- count so we only generate the required rows in the child table.
-          l_ret_var(l_ret_idx).ref_loader_code := l_ret_var(l_ret_idx).ref_loader_code || '
-            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := core_random.r_natural(l_ref_min_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ', l_ref_max_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ');
-            l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' := l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' + l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(i.ref_dist_col);
-            if l_ref_min_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' > l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' then
-              l_ref_min_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' := 1;
-              l_ref_max_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' := l_ref_min_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ';
-            elsif l_ref_max_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' > l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' then
-              l_ref_max_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' := l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ';
-            end if;
-            if l_ref_track_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' >= l_ref_distr_' || substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || ' then
-              exit;
-            end if;';
-        end if;
-        l_ret_var(l_ret_idx).ref_loader_code := l_ret_var(l_ret_idx).ref_loader_code || '
-          end loop;
-          -- Set the index
-          l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list.first;
-        ';
-        -- Now we build the logic of reference values
-        l_ret_var(l_ret_idx).ref_logic_code := '
-            l_ret_var.' || l_ret_var(l_ret_idx).column_name || ' := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx;
-            l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx) := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx) - 1;
-            if l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx) = 0 then
-              l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list.next(l_'|| substr(l_ret_var(l_ret_idx).reference_column, 1, 15) || '_list_idx);
-            end if;
-        ';
+        -- We have a reference field; a foreign key to an existing table.
+        testdata_piecebuilder.parse_reference(l_tmp_column, l_ret_idx, l_ret_var);
       elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '~' then
-        l_ret_var(l_ret_idx).column_type := 'fixed';
-        l_ret_var(l_ret_idx).fixed_value := substr(util_random.ru_extract(l_tmp_column, 3, '#'), 2);
+        testdata_piecebuilder.parse_fixed(l_tmp_column, l_ret_idx, l_ret_var);
       elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '^' then
-        l_ret_var(l_ret_idx).column_type := 'builtin';
-        l_tmp_reference := substr(util_random.ru_extract(l_tmp_column, 3, '#'), 2);
-        -- Builtin elements are split by ~
-        l_ret_var(l_ret_idx).builtin_type := util_random.ru_extract(l_tmp_reference, 1, '~');
-        if l_ret_var(l_ret_idx).builtin_type = 'numiterate' then
-          l_ret_var(l_ret_idx).builtin_function := 'util_random.ru_number_increment';
-        elsif l_ret_var(l_ret_idx).builtin_type = 'datiterate' then
-          l_ret_var(l_ret_idx).builtin_function := 'util_random.ru_date_increment';
-        end if;
-        if length(util_random.ru_extract(l_tmp_reference, 2, '~')) != length(l_tmp_reference) then
-          -- startfrom is defined.
-          l_ret_var(l_ret_idx).builtin_startpoint := util_random.ru_extract(l_tmp_reference, 2, '~');
-        else
-          if l_ret_var(l_ret_idx).builtin_type = 'numiterate' then
-            l_ret_var(l_ret_idx).builtin_startpoint := '1';
-          elsif l_ret_var(l_ret_idx).builtin_type = 'datiterate' then
-            l_ret_var(l_ret_idx).builtin_startpoint := to_char(sysdate, 'DDMMYYYY-HH24:MI:SS');
-          end if;
-        end if;
-        if length(util_random.ru_extract(l_tmp_reference, 3, '~')) != length(l_tmp_reference) then
-          -- increment is defined
-          l_ret_var(l_ret_idx).builtin_increment := util_random.ru_extract(l_tmp_reference, 3, '~');
-        else
-          if l_ret_var(l_ret_idx).builtin_type = 'numiterate' then
-            l_ret_var(l_ret_idx).builtin_increment := '1¤5';
-          elsif l_ret_var(l_ret_idx).builtin_type = 'datiterate' then
-            l_ret_var(l_ret_idx).builtin_increment := 'minutes¤1¤5';
-          end if;
-        end if;
-        -- First build the define code.
-        if l_ret_var(l_ret_idx).builtin_type = 'numiterate' then
-          l_ret_var(l_ret_idx).builtin_define_code := '
-            l_bltin_' || l_ret_var(l_ret_idx).column_name || ' number := ' || l_ret_var(l_ret_idx).builtin_startpoint || ';';
-        elsif l_ret_var(l_ret_idx).builtin_type = 'datiterate' then
-          l_ret_var(l_ret_idx).builtin_define_code := '
-            l_bltin_' || l_ret_var(l_ret_idx).column_name || ' date := to_date(''' || l_ret_var(l_ret_idx).builtin_startpoint || ''', ''DDMMYYYY-HH24:MI:SS'');';
-        end if;
-        -- Now we can build the logic.
-        if l_ret_var(l_ret_idx).builtin_type = 'numiterate' then
-          l_ret_var(l_ret_idx).builtin_logic_code := '
-            l_bltin_' || l_ret_var(l_ret_idx).column_name || ' := ' || l_ret_var(l_ret_idx).builtin_function || '(l_bltin_' || l_ret_var(l_ret_idx).column_name || ', ' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 1, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 2, '¤') || ');';
-        elsif l_ret_var(l_ret_idx).builtin_type = 'datiterate' then
-          l_ret_var(l_ret_idx).builtin_logic_code := '
-            l_bltin_' || l_ret_var(l_ret_idx).column_name || ' := ' || l_ret_var(l_ret_idx).builtin_function || '(l_bltin_' || l_ret_var(l_ret_idx).column_name || ', ''' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 1, '¤') || ''', ' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 2, '¤') || ', ' || util_random.ru_extract(l_ret_var(l_ret_idx).builtin_increment, 3, '¤') || ');';
-        end if;
+        -- Parse the builtin information.
+        testdata_piecebuilder.parse_builtin(l_tmp_column, l_ret_idx, l_ret_var);
       elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '$' then
         -- We have a reference list. Do not build as a real field, only generate and store
         -- so we can reference a value from it, from generated field.
         -- If the string is enclosed in square brackets, we take it as a fixed value list,
         -- else the following string is treated as generator function and number of elements to
         -- generate for the list, separated by the ¤ character.
-        l_ret_var(l_ret_idx).column_type := 'referencelist';
-        if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 2, 1) = '[' then
-          -- Fixed list. Set referencelist values to string between the square brackets.
-          l_ret_var(l_ret_idx).fixed_value := substr(util_random.ru_extract(l_tmp_column, 3, '#'), 3);
-          l_ret_var(l_ret_idx).fixed_value := substr(l_ret_var(l_ret_idx).fixed_value, 1, length(l_ret_var(l_ret_idx).fixed_value) - 1);
-        else
-          -- Generate the list at runtime. Define the code to do so.
-          null;
-        end if;
+        testdata_piecebuilder.parse_referencelist(l_tmp_column, l_ret_idx, l_ret_var);
       else
-        l_ret_var(l_ret_idx).column_type := 'generated';
-        -- First check if we allow nulls. If the generator is surrounded by parentheses
-        -- then we allow nulls. The number after the closing parentheses is the percentage
-        -- of rows that should be null.
-        l_tmp_generated := util_random.ru_extract(l_tmp_column, 3, '#');
-        if substr(l_tmp_generated, 1, 1) = '(' then
-          -- Column allowed to be null.
-          -- check if nullable percentage is set, else default to 10%
-          if substr(l_tmp_generated, -1, 1) = ')' then
-            -- No nullable defined.
-            l_ret_var(l_ret_idx).generator_nullable := 10;
-          else
-            l_ret_var(l_ret_idx).generator_nullable := substr(l_tmp_generated, instr(l_tmp_generated, ')') + 1);
-          end if;
-          l_ret_var(l_ret_idx).generator := substr(l_tmp_generated, 2, instr(l_tmp_generated, ')') - 2);
-        else
-          l_ret_var(l_ret_idx).generator := l_tmp_generated;
-          l_ret_var(l_ret_idx).generator_nullable := null;
-        end if;
-        if length(util_random.ru_extract(l_tmp_column, 4, '#')) != length(l_tmp_column) then
-          -- Manually specified input variables always override auto replace.
-          l_ret_var(l_ret_idx).generator_args := util_random.ru_extract(l_tmp_column, 4, '#');
-          l_reference_replace := instr(l_ret_var(l_ret_idx).generator_args, '%%');
-          while l_reference_replace > 0 loop
-            -- Start replacing backwards reference fields
-            l_ret_var(l_ret_idx).generator_args := substr(l_ret_var(l_ret_idx).generator_args, 1, l_reference_replace -1) || 'l_ret_var.' || substr(l_ret_var(l_ret_idx).generator_args, l_reference_replace + 2);
-            -- Remove end reference field marker
-            l_reference_replace := instr(l_ret_var(l_ret_idx).generator_args, '%%');
-            l_ret_var(l_ret_idx).generator_args := substr(l_ret_var(l_ret_idx).generator_args, 1, l_reference_replace -1) || substr(l_ret_var(l_ret_idx).generator_args, l_reference_replace + 2);
-            -- Get the next marker.
-            l_reference_replace := instr(l_ret_var(l_ret_idx).generator_args, '%%');
-          end loop;
-        else
-          -- Let us check if any of the inputs to this column is generated from other columns.
-          for y in 1..l_input_track(i).count loop
-            if length(l_ret_var(l_ret_idx).generator_args) > 0 then
-              l_ret_var(l_ret_idx).generator_args := l_ret_var(l_ret_idx).generator_args || ', ';
-            end if;
-            l_ret_var(l_ret_idx).generator_args := l_ret_var(l_ret_idx).generator_args || l_input_track(i)(y).input_name || ' => ' || 'l_ret_var.' || l_input_track(i)(y).draw_from_col;
-          end loop;
-        end if;
+        testdata_piecebuilder.parse_generated(l_tmp_column, l_ret_idx, l_ret_var, g_input_track, i);
       end if;
     end loop;
 
@@ -638,7 +458,8 @@ as
         type '|| generator_name ||'_tab is table of '|| generator_name ||'_rec;
 
         function '|| generator_name ||' (
-          generator_count         number default g_default_generator_rows';
+          generator_count         number default g_default_generator_rows
+          , predictable_key       varchar2 default to_char(systimestamp,''FFSSMIHH24DDMMYYYY'') || sys_context(''USERENV'', ''SESSIONID'')';
 
     for i in 1..l_generator_columns.count loop
       if l_generator_columns(i).column_type = 'reference field' then
@@ -862,7 +683,8 @@ as
         end to_table;
 
         function '|| generator_name ||' (
-          generator_count         number default g_default_generator_rows';
+          generator_count         number default g_default_generator_rows
+          , predictable_key       varchar2 default to_char(systimestamp,''FFSSMIHH24DDMMYYYY'') || sys_context(''USERENV'', ''SESSIONID'')';
 
     for i in 1..l_generator_columns.count loop
       if l_generator_columns(i).column_type = 'reference field' then
