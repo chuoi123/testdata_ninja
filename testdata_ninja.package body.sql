@@ -9,135 +9,6 @@ as
   type track_output_ord_tab is table of number index by varchar2(128);
   l_output_order_track    track_output_ord_tab;
 
-  function guess_data_generator (
-    data_type                   in        varchar2
-    , column_name               in        varchar2
-    , value_example             in        varchar2 default null
-    , value_low                 in        raw default null
-    , value_high                in        raw default null
-  )
-  return varchar2
-
-  as
-
-    l_ret_var               varchar2(500) := null;
-    l_guess_idx             varchar2(128);
-    type seed_vals_varchar_tab is table of varchar2(4000) index by varchar2(128);
-    l_guess_varchar_seed_vals       seed_vals_varchar_tab;
-    l_guess_number_seed_vals        seed_vals_varchar_tab;
-    l_guess_date_seed_vals          seed_vals_varchar_tab;
-    l_guess_range_low_num           number := null;
-    l_guess_range_high_num          number := null;
-    l_guess_range_high_char         varchar2(32000) := null;
-    l_guess_range_low_char          varchar2(32000) := null;
-    l_guess_range_low_date          date := null;
-    l_guess_range_high_date         date := null;
-
-  begin
-
-    dbms_application_info.set_action('guess_data_generator');
-
-    if value_low is not null then
-      case data_type
-        when 'NUMBER' then l_guess_range_low_num := utl_raw.cast_to_number(value_low);
-        when 'VARCHAR2' then l_guess_range_low_char := utl_raw.cast_to_varchar2(value_low);
-        when 'DATE' then l_guess_range_low_date := to_date(rtrim(to_char(100*(to_number(substr(value_low,1,2),'XX')-100)
-                                                    + (to_number(substr(value_low,3,2),'XX')-100),'fm0000')||'-'||
-                                                    to_char(to_number(substr(value_low,5,2),'XX'),'fm00')||'-'||
-                                                    to_char(to_number(substr(value_low,7,2),'XX'),'fm00')||' '||
-                                                    to_char(to_number(substr(value_low,9,2),'XX')-1,'fm00')||':'||
-                                                    to_char(to_number(substr(value_low,11,2),'XX')-1,'fm00')||':'||
-                                                    to_char(to_number(substr(value_low,13,2),'XX')-1,'fm00')), 'YYYY-MM-DD HH24:MI:SS');
-        else null;
-      end case;
-    end if;
-
-    if value_high is not null then
-      case data_type
-        when 'NUMBER' then l_guess_range_high_num := utl_raw.cast_to_number(value_high);
-        when 'VARCHAR2' then l_guess_range_high_char := utl_raw.cast_to_varchar2(value_high);
-        when 'DATE' then l_guess_range_high_date := to_date(rtrim(to_char(100*(to_number(substr(value_high,1,2),'XX')-100)
-                                                    + (to_number(substr(value_high,3,2),'XX')-100),'fm0000')||'-'||
-                                                    to_char(to_number(substr(value_high,5,2),'XX'),'fm00')||'-'||
-                                                    to_char(to_number(substr(value_high,7,2),'XX'),'fm00')||' '||
-                                                    to_char(to_number(substr(value_high,9,2),'XX')-1,'fm00')||':'||
-                                                    to_char(to_number(substr(value_high,11,2),'XX')-1,'fm00')||':'||
-                                                    to_char(to_number(substr(value_high,13,2),'XX')-1,'fm00')), 'YYYY-MM-DD HH24:MI:SS');
-        else null;
-      end case;
-    end if;
-
-    l_guess_varchar_seed_vals('person_random.r_firstname') := 'FNAME,FIRSTNAME,FIRST_NAME';
-    l_guess_varchar_seed_vals('person_random.r_lastname') := 'LNAME,LASTNAME,LAST_NAME,ENAME';
-    l_guess_varchar_seed_vals('person_random.r_name') := 'NAME,FULLNAME,FULL_NAME';
-    l_guess_number_seed_vals('person_random.r_salary') := 'SALARY,SAL,BONUS,PAY';
-    l_guess_number_seed_vals('finance_random.r_amount#[low],[high]') := 'PRICE,ORDER,PAYMENT,COST';
-    l_guess_varchar_seed_vals('location_random.r_country#true') := 'CNTRY,COUNTRY,CTRY';
-    l_guess_varchar_seed_vals('person_random.r_jobtitle') := 'JOB,TITLE';
-    l_guess_varchar_seed_vals('location_random.r_city') := 'LOCATION,LOC,CITY,TOWN';
-    l_guess_date_seed_vals('time_random.r_datebetween#to_date(''[low]'',''DD-MON-YYYY HH24:MI:SS''),to_date(''[high]'',''DD-MON-YYYY HH24:MI:SS'')') := 'HIREDATE,BIRTHDAY,BDAY';
-
-    if value_example is null then
-      -- Only guess using type and name.
-      if data_type = 'VARCHAR2' then
-        l_guess_idx := l_guess_varchar_seed_vals.first;
-        while l_guess_idx is not null loop
-          if util_random.ru_inlist(l_guess_varchar_seed_vals(l_guess_idx), upper(column_name)) then
-            l_ret_var := l_guess_idx;
-            if l_guess_range_low_char is not null then
-              -- We always have both low and high when it is not null. So automatically replace both.
-              l_ret_var := replace(replace(l_ret_var, '[low]', l_guess_range_low_char), '[high]', l_guess_range_high_char);
-            else
-              l_ret_var := nvl(substr(l_ret_var, 1, instr(l_ret_var, '#') - 1), l_ret_var);
-            end if;
-            exit;
-          end if;
-          l_guess_idx := l_guess_varchar_seed_vals.next(l_guess_idx);
-        end loop;
-      elsif data_type = 'NUMBER' then
-        l_guess_idx := l_guess_number_seed_vals.first;
-        while l_guess_idx is not null loop
-          if util_random.ru_inlist(l_guess_number_seed_vals(l_guess_idx), upper(column_name)) then
-            l_ret_var := l_guess_idx;
-            if l_guess_range_low_num is not null then
-              -- We always have both low and high when it is not null. So automaticall replace both.
-              l_ret_var := replace(replace(l_ret_var, '[low]', l_guess_range_low_num), '[high]', l_guess_range_high_num);
-            else
-              l_ret_var := nvl(substr(l_ret_var, 1, instr(l_ret_var, '#') - 1), l_ret_var);
-            end if;
-            exit;
-          end if;
-          l_guess_idx := l_guess_number_seed_vals.next(l_guess_idx);
-        end loop;
-      elsif data_type = 'DATE' then
-        l_guess_idx := l_guess_date_seed_vals.first;
-        while l_guess_idx is not null loop
-          if util_random.ru_inlist(l_guess_date_seed_vals(l_guess_idx), upper(column_name)) then
-            l_ret_var := l_guess_idx;
-            if l_guess_range_low_date is not null then
-              -- We always have both low and high when it is not null. So automaticall replace both.
-              l_ret_var := replace(replace(l_ret_var, '[low]', l_guess_range_low_date), '[high]', l_guess_range_high_date);
-            else
-              l_ret_var := nvl(substr(l_ret_var, 1, instr(l_ret_var, '#') - 1), l_ret_var);
-            end if;
-            exit;
-          end if;
-          l_guess_idx := l_guess_date_seed_vals.next(l_guess_idx);
-        end loop;
-      end if;
-    end if;
-
-    dbms_application_info.set_action(null);
-
-    return l_ret_var;
-
-    /* exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise; */
-
-  end guess_data_generator;
-
   function parse_generator_cols (
     column_metadata             in        varchar2
     , column_order              out       topological_ninja.topo_number_list
@@ -161,7 +32,7 @@ as
 
     cursor get_inputs(pkg_name varchar2, fnc_name varchar2) is
       select
-        argument_name
+        distinct argument_name
         , position
       from
         all_arguments

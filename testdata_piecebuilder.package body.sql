@@ -308,6 +308,7 @@ as
       end loop;
     else
       -- Let us check if any of the inputs to this column is generated from other columns.
+      dbms_output.put_line('Number of inputs to this column: ' || input_tracker(input_idx).count);
       for y in 1..input_tracker(input_idx).count loop
         if length(generator_definition(column_idx).generator_args) > 0 then
           generator_definition(column_idx).generator_args := generator_definition(column_idx).generator_args || ', ';
