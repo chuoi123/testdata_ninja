@@ -93,9 +93,6 @@ as
     end loop;
 
     column_order := topological_ninja.f_s(dependency_list => l_dependencies, full_list_num => l_all_cols_sorted);
-    for i in 1..column_order.count loop
-      dbms_output.put_line('#' || i || ': ' || column_order(i));
-    end loop;
 
     for i in 1..l_column_count loop
       l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
@@ -227,6 +224,10 @@ as
       -- NEW WAY
       testdata_data_infer.infer_generators(metadata => l_all_meta);
 
+      -- Here is where we should build the input tracker for arguments.
+      -- Just like the parser from metadata, we might have columns in this parser
+      -- where we want to reference other column values.
+
       -- Loop over all the columns.
       for i in 1..l_all_meta.table_columns.count loop
         -- First extend
@@ -314,13 +315,11 @@ as
         ';
 
         for i in 1..l_generator_columns.count loop
-          if l_generator_columns(i).column_type != 'referencelist' then
-            if l_generator_first_col then
-              l_generator_pkg_head := l_generator_pkg_head || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
-              l_generator_first_col := false;
-            else
-              l_generator_pkg_head := l_generator_pkg_head || ', ' || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
-            end if;
+          if l_generator_first_col then
+            l_generator_pkg_head := l_generator_pkg_head || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
+            l_generator_first_col := false;
+          else
+            l_generator_pkg_head := l_generator_pkg_head || ', ' || l_generator_columns(i).column_name || ' ' || l_generator_columns(i).data_type;
           end if;
         end loop;
 
@@ -585,6 +584,8 @@ as
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_define_code;
       elsif l_generator_columns(i).column_type = 'builtin' then
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
+      elsif l_generator_columns(i).column_type = 'referencelist' and l_generator_columns(i).builtin_define_code is not null then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
       end if;
     end loop;
 
@@ -632,6 +633,14 @@ as
       elsif l_generator_columns(l_build_idx).column_type = 'builtin' then
         l_generator_pkg_body := l_generator_pkg_body || '
           l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := l_bltin_' || l_generator_columns(l_build_idx).column_name || ';' || l_generator_columns(l_build_idx).builtin_logic_code;
+      elsif l_generator_columns(l_build_idx).column_type = 'referencelist' then
+        if l_generator_columns(l_build_idx).builtin_define_code is null then
+          l_generator_pkg_body := l_generator_pkg_body || '
+            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(''' || l_generator_columns(l_build_idx).fixed_value || ''');';
+        else
+          l_generator_pkg_body := l_generator_pkg_body || '
+            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(l_bltin_' || l_generator_columns(l_build_idx).column_name || ');';
+        end if;
       else
         if l_generator_columns(l_build_idx).column_type != 'referencelist' then
         -- Check if we need to add arguments or not and if nullable is enabled.
