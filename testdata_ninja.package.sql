@@ -20,6 +20,32 @@ as
   type track_input_tab2 is table of track_input_tab1;
   g_input_track           track_input_tab2;
 
+  -- json variables
+  type j_result_rec is record (
+    j_column_name                       varchar2(250)
+    , j_column_datatype                 varchar2(250)
+    , j_column_type                     varchar2(250)
+    , j_builtin_type                    varchar2(250)
+    , j_builtin_function                varchar2(250)
+    , j_builtin_startfrom               varchar2(250)
+    , j_builtin_increment_min           varchar2(250)
+    , j_builtin_increment_max           varchar2(250)
+    , j_builtin_increment_component     varchar2(250)
+    , j_fixed_value                     varchar2(250)
+    , j_reference_table                 varchar2(250)
+    , j_reference_column                varchar2(250)
+    , j_reference_distribution_type     varchar2(250)
+    , j_distribution_simple_val         varchar2(250)
+    , j_distribution_range_start        varchar2(250)
+    , j_distribution_range_end          varchar2(250)
+    , j_distribution_weighted           varchar2(4000)
+    , j_reference_static_list           varchar2(250)
+    , j_generator                       varchar2(250)
+    , j_nullable                        varchar2(250)
+    , j_arguments                       varchar2(250)
+  );
+  type j_result_tab is table of j_result_rec;
+
   -- Globals
   g_default_generator_rows        number := 10;
 

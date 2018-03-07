@@ -8,31 +8,6 @@ as
   -- Keep track of output order for topo sort.
   type track_output_ord_tab is table of number index by varchar2(128);
   l_output_order_track    track_output_ord_tab;
-  -- json
-  type j_result_rec is record (
-    j_column_name                       varchar2(250)
-    , j_column_datatype                 varchar2(250)
-    , j_column_type                     varchar2(250)
-    , j_builtin_type                    varchar2(250)
-    , j_builtin_function                varchar2(250)
-    , j_builtin_startfrom               varchar2(250)
-    , j_builtin_increment_min           varchar2(250)
-    , j_builtin_increment_max           varchar2(250)
-    , j_builtin_increment_component     varchar2(250)
-    , j_fixed_value                     varchar2(250)
-    , j_reference_table                 varchar2(250)
-    , j_reference_column                varchar2(250)
-    , j_reference_distribution_type     varchar2(250)
-    , j_distribution_simple_val         varchar2(250)
-    , j_distribution_range_start        varchar2(250)
-    , j_distribution_range_end          varchar2(250)
-    , j_distribution_weighted           varchar2(4000)
-    , j_reference_static_list           varchar2(250)
-    , j_generator                       varchar2(250)
-    , j_nullable                        varchar2(250)
-    , j_arguments                       varchar2(250)
-  );
-  type j_result_tab is table of j_result_rec;
 
   procedure input_tracking (
     metadata                in                    varchar2
@@ -170,12 +145,12 @@ as
     l_tmp_reference         varchar2(4000);
     l_tmp_generated         varchar2(4000);
     l_reference_replace     number;
-    l_check_for_json        number;
+    l_check_for_json        number := 0;
 
     l_dependencies          topological_ninja.topo_dependency_list;
     l_all_cols_sorted       topological_ninja.topo_number_list := topological_ninja.topo_number_list();
 
-    j_result      j_result_tab := j_result_tab();
+    j_result                j_result_tab := j_result_tab();
 
     json_parse_stmt varchar2(32000) := '
       with text_json as (
@@ -270,7 +245,27 @@ as
     column_order := topological_ninja.f_s(dependency_list => l_dependencies, full_list_num => l_all_cols_sorted);
 
     if l_check_for_json = 1 then
-      dbms_output.put_line('Parsed ' || l_column_count || ' rows');
+      for i in 1..l_column_count loop
+        l_ret_var.extend(1);
+        l_ret_idx := l_ret_var.count;
+        -- Set the basics
+        l_ret_var(l_ret_idx).column_name := j_result(l_ret_idx).j_column_name;
+        l_ret_var(l_ret_idx).data_type := j_result(l_ret_idx).j_column_datatype;
+        -- Check for generator types
+        if j_result(l_ret_idx).j_column_type = 'reference field' then
+          -- Handle json reference field
+          testdata_piecebuilder.parse_reference_json(j_result, l_ret_idx, l_ret_var);
+        elsif j_result(l_ret_idx).j_column_type = 'fixed' then
+          testdata_piecebuilder.parse_fixed_json(j_result, l_ret_idx, l_ret_var);
+        elsif j_result(l_ret_idx).j_column_type = 'builtin' then
+          testdata_piecebuilder.parse_builtin_json(j_result, l_ret_idx, l_ret_var);
+        elsif j_result(l_ret_idx).j_column_type = 'referencelist' then
+          testdata_piecebuilder.parse_referencelist_json(j_result, l_ret_idx, l_ret_var);
+        else
+          -- Generated
+          testdata_piecebuilder.parse_generated_json(j_result, l_ret_idx, l_ret_var, g_input_track, i);
+        end if;
+      end loop;
     else
       for i in 1..l_column_count loop
         l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
