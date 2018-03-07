@@ -16,9 +16,9 @@ as
 
     generator_definition(column_idx).column_type := 'builtin';
     generator_definition(column_idx).builtin_type := field_spec(column_idx).j_builtin_type;
-    if field_spec(column_idx).j_builtin_type = 'numiterate' then
+    if generator_definition(column_idx).builtin_type = 'numiterate' then
       generator_definition(column_idx).builtin_function := 'util_random.ru_number_increment';
-    elsif field_spec(column_idx).j_builtin_type = 'datiterate' then
+    elsif generator_definition(column_idx).builtin_type = 'datiterate' then
       generator_definition(column_idx).builtin_function := 'util_random.ru_date_increment';
     end if;
     if field_spec(column_idx).j_builtin_startfrom is not null then
