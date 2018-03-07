@@ -8,6 +8,152 @@ as
   -- Keep track of output order for topo sort.
   type track_output_ord_tab is table of number index by varchar2(128);
   l_output_order_track    track_output_ord_tab;
+  -- json
+  type j_result_rec is record (
+    j_column_name                       varchar2(250)
+    , j_column_datatype                 varchar2(250)
+    , j_column_type                     varchar2(250)
+    , j_builtin_type                    varchar2(250)
+    , j_builtin_function                varchar2(250)
+    , j_builtin_startfrom               varchar2(250)
+    , j_builtin_increment_min           varchar2(250)
+    , j_builtin_increment_max           varchar2(250)
+    , j_builtin_increment_component     varchar2(250)
+    , j_fixed_value                     varchar2(250)
+    , j_reference_table                 varchar2(250)
+    , j_reference_column                varchar2(250)
+    , j_reference_distribution_type     varchar2(250)
+    , j_distribution_simple_val         varchar2(250)
+    , j_distribution_range_start        varchar2(250)
+    , j_distribution_range_end          varchar2(250)
+    , j_distribution_weighted           varchar2(4000)
+    , j_reference_static_list           varchar2(250)
+    , j_generator                       varchar2(250)
+    , j_nullable                        varchar2(250)
+    , j_arguments                       varchar2(250)
+  );
+  type j_result_tab is table of j_result_rec;
+
+  procedure input_tracking (
+    metadata                in                    varchar2
+    , json_metadata         in                    j_result_tab
+    , dependencies          in out nocopy         topological_ninja.topo_dependency_list
+    , columns_all_sorted    in out nocopy         topological_ninja.topo_number_list
+    , col_count             in out nocopy         number
+  )
+
+  as
+
+    l_tmp_column            varchar2(4000);
+    l_tmp_pkg_name          varchar2(128);
+    l_tmp_fnc_name          varchar2(128);
+
+    cursor get_inputs(pkg_name varchar2, fnc_name varchar2) is
+      select
+        distinct argument_name
+        , position
+      from
+        all_arguments
+      where
+        object_name = upper(fnc_name)
+      and
+        nvl(package_name, '1') = nvl(upper(pkg_name), '1')
+      and
+        in_out = 'IN'
+      order by
+        position;
+
+  begin
+
+    dbms_application_info.set_action('input_tracking');
+
+    for i in 1..col_count loop
+      columns_all_sorted.extend(1);
+      columns_all_sorted(columns_all_sorted.count) := i;
+      if json_metadata.count > 0 then
+        -- We are in json
+        if json_metadata(i).j_column_type = 'generated' then
+          if instr(json_metadata(i).j_generator, '.') > 0 then
+            -- Package, extract function from path.
+            l_tmp_fnc_name := upper(substr(json_metadata(i).j_generator, instr(json_metadata(i).j_generator, '.') + 1));
+          else
+            -- Pure function
+            l_tmp_fnc_name := upper(json_metadata(i).j_generator);
+          end if;
+          l_output_track(l_tmp_fnc_name) := json_metadata(i).j_column_name;
+          l_output_order_track(l_tmp_fnc_name) := i;
+        end if;
+      else
+        l_tmp_column := util_random.ru_extract(metadata, i, '@');
+        if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) not in ('£', '~', '^')  then
+          -- We have a generated column. Save the generator name, for use in auto input reference.
+          if instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') > 0 then
+            l_tmp_fnc_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') + 1));
+          else
+            -- Pure function
+            l_tmp_fnc_name := upper(util_random.ru_extract(l_tmp_column, 3, '#'));
+          end if;
+          l_output_track(l_tmp_fnc_name) := util_random.ru_extract(l_tmp_column, 1, '#');
+          l_output_order_track(l_tmp_fnc_name) := i;
+        end if;
+      end if;
+    end loop;
+
+    g_input_track := track_input_tab2();
+    g_input_track.extend(col_count);
+    -- initialize sub table type.
+    for i in 1..g_input_track.count() loop
+      g_input_track(i) := track_input_tab1();
+    end loop;
+
+    for i in 1..col_count loop
+      if json_metadata.count > 0 then
+        if json_metadata(i).j_column_type = 'generated' then
+          if instr(json_metadata(i).j_generator, '.') > 0 then
+            -- Package, extract function from path.
+            l_tmp_pkg_name := upper(substr(json_metadata(i).j_generator, 1, instr(json_metadata(i).j_generator, '.') - 1));
+            l_tmp_fnc_name := upper(substr(json_metadata(i).j_generator, instr(json_metadata(i).j_generator, '.') + 1));
+          else
+            -- Pure function
+            l_tmp_pkg_name := null;
+            l_tmp_fnc_name := upper(json_metadata(i).j_generator);
+          end if;
+        end if;
+      else
+        l_tmp_column := util_random.ru_extract(metadata, i, '@');
+        if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) not in ('£', '~', '^')  then
+          -- We have a generated column. Save the generator name, for use in auto input reference.
+          -- Get column generator components.
+          if instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') > 0 then
+            l_tmp_pkg_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') - 1));
+            l_tmp_fnc_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') + 1));
+          else
+            l_tmp_pkg_name := null;
+            l_tmp_fnc_name := upper(util_random.ru_extract(l_tmp_column, 3, '#'));
+          end if;
+        end if;
+      end if;
+      for y in get_inputs(l_tmp_pkg_name, l_tmp_fnc_name) loop
+        if l_output_track.exists(y.argument_name) then
+          g_input_track(i).extend(1);
+          g_input_track(i)(g_input_track(i).count).input_name := y.argument_name;
+          g_input_track(i)(g_input_track(i).count).input_position := y.position;
+          g_input_track(i)(g_input_track(i).count).draw_from_col := l_output_track(y.argument_name);
+          g_input_track(i)(g_input_track(i).count).draw_from_col_num := l_output_order_track(l_tmp_fnc_name);
+          dependencies(l_output_order_track(l_tmp_fnc_name)) := y.position;
+          -- dbms_output.put_line(l_tmp_fnc_name || '(' || l_output_order_track(l_tmp_fnc_name) || ') is dependent on ' || l_output_track(y.argument_name) || '(' || l_output_track(l_tmp_fnc_name) || ')');
+        end if;
+      end loop;
+    end loop;
+
+    dbms_application_info.set_action(null);
+
+    exception
+      when others then
+        dbms_application_info.set_action(null);
+        raise;
+
+  end input_tracking;
 
   function parse_generator_cols (
     column_metadata             in        varchar2
@@ -19,108 +165,143 @@ as
 
     l_ret_var               generator_columns := generator_columns();
     l_ret_idx               number;
-    l_column_count          number := regexp_count(column_metadata, '@') + 1;
+    l_column_count          number;
     l_tmp_column            varchar2(4000);
     l_tmp_reference         varchar2(4000);
     l_tmp_generated         varchar2(4000);
     l_reference_replace     number;
     l_tmp_pkg_name          varchar2(128);
     l_tmp_fnc_name          varchar2(128);
+    l_check_for_json        number;
 
     l_dependencies          topological_ninja.topo_dependency_list;
     l_all_cols_sorted       topological_ninja.topo_number_list := topological_ninja.topo_number_list();
 
-    cursor get_inputs(pkg_name varchar2, fnc_name varchar2) is
+    j_result      j_result_tab := j_result_tab();
+
+    json_parse_stmt varchar2(32000) := '
+      with text_json as (
+        select :json_in as jdata from dual
+      )
       select
-        distinct argument_name
-        , position
+        jt.column_name
+        , jt.column_datatype
+        , jt.column_type
+        , jt.builtin_type
+        , jt.builtin_function
+        , jt.builtin_startfrom
+        , jt.builtin_increment_min
+        , jt.builtin_increment_max
+        , jt.builtin_increment_component
+        , jt.fixed_value
+        , jt.reference_table
+        , jt.reference_column
+        , jt.reference_distribution_type
+        , jt.distribution_simple_val
+        , jt.distribution_range_start
+        , jt.distribution_range_end
+        , jt.distribution_weighted
+        , jt.reference_static_list
+        , jt.generator
+        , jt.nullable
+        , jt.arguments
       from
-        all_arguments
-      where
-        object_name = upper(fnc_name)
-      and
-        package_name = upper(pkg_name)
-      and
-        in_out = 'IN'
-      order by
-        position;
+        text_json
+        , json_table(jdata, ''$''
+          columns (
+            nested path ''$.columns[*]''
+              columns (
+                column_name varchar2(250) path ''$.column_name''
+                , column_datatype varchar2(250) path ''$.column_datatype''
+                , column_type varchar2(250) path ''$.column_type''
+                , builtin_type varchar2(250) path ''$.builtin_type''
+                , builtin_function varchar2(250) path ''$.builtin_function''
+                , builtin_startfrom varchar2(250) path ''$.builtin_startfrom''
+                , builtin_increment_min varchar2(250) path ''$.builtin_increment_min''
+                , builtin_increment_max varchar2(250) path ''$.builtin_increment_max''
+                , builtin_increment_component varchar2(250) path ''$.builtin_increment_component''
+                , fixed_value varchar2(250) path ''$.fixed_value''
+                , reference_table varchar2(250) path ''$.reference_table''
+                , reference_column varchar2(250) path ''$.reference_column''
+                , reference_distribution_type varchar2(250) path ''$.reference_distribution_type''
+                , distribution_simple_val varchar2(250) path ''$.distribution_simple_val''
+                , distribution_range_start varchar2(250) path ''$.distribution_range_start''
+                , distribution_range_end varchar2(250) path ''$.distribution_range_end''
+                , distribution_weighted varchar2(250) format json path ''$.distribution_weighted''
+                , reference_static_list varchar2(250) path ''$.reference_static_list''
+                , generator varchar2(250) path ''$.generator''
+                , nullable varchar2(250) path ''$.nullable''
+                , arguments varchar2(250) path ''$.arguments''
+              )
+          )
+        ) jt';
 
   begin
 
     dbms_application_info.set_action('parse_generator_cols');
 
-    -- First extract generator to column id and inputs to generators.
-    for i in 1..l_column_count loop
-      l_all_cols_sorted.extend(1);
-      l_all_cols_sorted(l_all_cols_sorted.count) := i;
-      l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
-      if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) not in ('£', '~', '^')  then
-        -- We have a generated column. Save the generator name, for use in auto input reference.
-        l_tmp_fnc_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') + 1));
-        l_output_track(l_tmp_fnc_name) := util_random.ru_extract(l_tmp_column, 1, '#');
-        l_output_order_track(l_tmp_fnc_name) := i;
+    $if dbms_db_version.ver_le_12 $then
+      select case
+        when column_metadata is json then 1
+        else 0
+      end
+      into l_check_for_json
+      from dual;
+    $end
+
+    $if dbms_db_version.ver_le_12 $then
+      if l_check_for_json = 1 then
+        -- we have format in json
+        execute immediate
+          json_parse_stmt
+        bulk collect into
+          j_result
+        using column_metadata;
+
+        l_column_count := j_result.count;
+      else
+        -- Format in classic
+         l_column_count := regexp_count(column_metadata, '@') + 1;
       end if;
-    end loop;
+    $else
+      l_column_count := regexp_count(column_metadata, '@') + 1;
+    $end
 
-    g_input_track := track_input_tab2();
-    g_input_track.extend(l_column_count);
-    -- initialize sub table type.
-    for i in 1..g_input_track.count() loop
-      g_input_track(i) := track_input_tab1();
-    end loop;
-
-    -- Next we map input parameters to generators.
-    for i in 1..l_column_count loop
-      l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
-      if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) not in ('£', '~', '^')  then
-        -- We have a generated column. Save the generator name, for use in auto input reference.
-        -- Get column generator components.
-        l_tmp_pkg_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') - 1));
-        l_tmp_fnc_name := upper(substr(util_random.ru_extract(l_tmp_column, 3, '#'), instr(util_random.ru_extract(l_tmp_column, 3, '#'), '.') + 1));
-        for y in get_inputs(l_tmp_pkg_name, l_tmp_fnc_name) loop
-          if l_output_track.exists(y.argument_name) then
-            g_input_track(i).extend(1);
-            g_input_track(i)(g_input_track(i).count).input_name := y.argument_name;
-            g_input_track(i)(g_input_track(i).count).input_position := y.position;
-            g_input_track(i)(g_input_track(i).count).draw_from_col := l_output_track(y.argument_name);
-            g_input_track(i)(g_input_track(i).count).draw_from_col_num := l_output_order_track(l_tmp_fnc_name);
-            -- my_dependencies(g_input_track(i)(g_input_track(i).count).input_position) := g_input_track(i)(g_input_track(i).count).draw_from_col_num;
-            l_dependencies(l_output_order_track(l_tmp_fnc_name)) := y.position;
-            -- dbms_output.put_line(l_tmp_fnc_name || '(' || l_output_order_track(l_tmp_fnc_name) || ') is dependent on ' || l_output_track(y.argument_name) || '(' || l_output_track(l_tmp_fnc_name) || ')');
-          end if;
-        end loop;
-      end if;
-    end loop;
-
+    -- Sort out interdependecies and column order.
+    input_tracking(column_metadata, j_result, l_dependencies, l_all_cols_sorted, l_column_count);
     column_order := topological_ninja.f_s(dependency_list => l_dependencies, full_list_num => l_all_cols_sorted);
 
-    for i in 1..l_column_count loop
-      l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
-      l_ret_var.extend(1);
-      l_ret_idx := l_ret_var.count;
-      -- Set the basics
-      l_ret_var(l_ret_idx).column_name := util_random.ru_extract(l_tmp_column, 1, '#');
-      l_ret_var(l_ret_idx).data_type := util_random.ru_extract(l_tmp_column, 2, '#');
-      -- Check generator type.
-      if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '£' then
-        -- We have a reference field; a foreign key to an existing table.
-        testdata_piecebuilder.parse_reference(l_tmp_column, l_ret_idx, l_ret_var);
-      elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '~' then
-        testdata_piecebuilder.parse_fixed(l_tmp_column, l_ret_idx, l_ret_var);
-      elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '^' then
-        -- Parse the builtin information.
-        testdata_piecebuilder.parse_builtin(l_tmp_column, l_ret_idx, l_ret_var);
-      elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '$' then
-        -- We have a reference list. Do not build as a real field, only generate and store
-        -- so we can reference a value from it, from generated field.
-        -- If the string is enclosed in square brackets, we take it as a fixed value list,
-        -- else the following string is treated as generator function and number of elements to
-        -- generate for the list, separated by the ¤ character.
-        testdata_piecebuilder.parse_referencelist(l_tmp_column, l_ret_idx, l_ret_var);
-      else
-        testdata_piecebuilder.parse_generated(l_tmp_column, l_ret_idx, l_ret_var, g_input_track, i);
-      end if;
-    end loop;
+    if l_check_for_json = 1 then
+      dbms_output.put_line('Parsed ' || l_column_count || ' rows');
+    else
+      for i in 1..l_column_count loop
+        l_tmp_column := util_random.ru_extract(column_metadata, i, '@');
+        l_ret_var.extend(1);
+        l_ret_idx := l_ret_var.count;
+        -- Set the basics
+        l_ret_var(l_ret_idx).column_name := util_random.ru_extract(l_tmp_column, 1, '#');
+        l_ret_var(l_ret_idx).data_type := util_random.ru_extract(l_tmp_column, 2, '#');
+        -- Check generator type.
+        if substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '£' then
+          -- We have a reference field; a foreign key to an existing table.
+          testdata_piecebuilder.parse_reference(l_tmp_column, l_ret_idx, l_ret_var);
+        elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '~' then
+          testdata_piecebuilder.parse_fixed(l_tmp_column, l_ret_idx, l_ret_var);
+        elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '^' then
+          -- Parse the builtin information.
+          testdata_piecebuilder.parse_builtin(l_tmp_column, l_ret_idx, l_ret_var);
+        elsif substr(util_random.ru_extract(l_tmp_column, 3, '#'), 1, 1) = '$' then
+          -- We have a reference list. Do not build as a real field, only generate and store
+          -- so we can reference a value from it, from generated field.
+          -- If the string is enclosed in square brackets, we take it as a fixed value list,
+          -- else the following string is treated as generator function and number of elements to
+          -- generate for the list, separated by the ¤ character.
+          testdata_piecebuilder.parse_referencelist(l_tmp_column, l_ret_idx, l_ret_var);
+        else
+          testdata_piecebuilder.parse_generated(l_tmp_column, l_ret_idx, l_ret_var, g_input_track, i);
+        end if;
+      end loop;
+    end if;
 
     dbms_application_info.set_action(null);
 
