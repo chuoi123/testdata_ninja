@@ -170,8 +170,6 @@ as
     l_tmp_reference         varchar2(4000);
     l_tmp_generated         varchar2(4000);
     l_reference_replace     number;
-    l_tmp_pkg_name          varchar2(128);
-    l_tmp_fnc_name          varchar2(128);
     l_check_for_json        number;
 
     l_dependencies          topological_ninja.topo_dependency_list;
