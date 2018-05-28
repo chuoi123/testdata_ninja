@@ -166,11 +166,11 @@ as
         , min(allcount) over (partition by sepcount) as minallcountbysep
         , max(allcount) over (partition by sepcount) as maxallcountbysep
         , case
-            when wcount = 1 then regexp_replace(regexp_replace('|| metadata.table_columns(col_idx).column_name ||', ''\d'', ''#''), ''[a-zA-Z]'', ''?'')
+            when wcount-sepcount = 1 then regexp_replace(regexp_replace('|| metadata.table_columns(col_idx).column_name ||', ''\d'', ''#''), ''[a-zA-Z]'', ''?'')
             else null
           end patternized
         , case
-            when (wcount = 1 and sepcount > 0) then regexp_substr('|| metadata.table_columns(col_idx).column_name ||', ''[-_/\|]'')
+            when (wcount-sepcount = 1 and sepcount > 0) then regexp_substr('|| metadata.table_columns(col_idx).column_name ||', ''[-_/\|]'')
             else null
           end sepvalue
       from (
@@ -197,6 +197,8 @@ as
         end if;
       end if;
     end loop;
+
+    close l_sample_data_cursor;
 
     dbms_application_info.set_action(null);
 

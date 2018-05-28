@@ -339,7 +339,7 @@ as
       select * from user_tab_col_statistics
       where table_name = upper(tab_name);
 
-    cursor get_tab_constraints is
+    cursor get_col_ref_constraint(col_name varchar2) is
       select
         a.table_name
         , a.column_name
@@ -348,20 +348,21 @@ as
         , c.r_owner
         , c_pk.table_name r_table_name
         , c_pk.constraint_name r_pk
+        , d_pk.column_name r_col
       from
         user_cons_columns a
       join
         user_constraints c on a.constraint_name = c.constraint_name
       join
         user_constraints c_pk on c.r_constraint_name = c_pk.constraint_name
+      join
+        user_cons_columns d_pk on c_pk.constraint_name = d_pk.constraint_name
       where
         c.constraint_type = 'R'
       and
-        a.table_name = upper(tab_name);
-
-    type cons_list_tab is table of get_tab_constraints%rowtype;
-
-    l_base_table_cons_info          cons_list_tab := cons_list_tab();
+        a.table_name = upper(tab_name)
+      and
+        a.column_name = upper(col_name);
 
     l_all_meta                      main_tab_meta;
 
@@ -386,14 +387,14 @@ as
         from all_tab_col_statistics
         where table_name = upper(tab_name)
         and column_name = i.column_name;
+        for x in get_col_ref_constraint(i.column_name) loop
+          l_all_meta.table_columns(l_all_meta.table_columns.count).column_is_foreign := 1;
+          l_all_meta.table_columns(l_all_meta.table_columns.count).column_def_ref_tab := x.r_table_name;
+          l_all_meta.table_columns(l_all_meta.table_columns.count).column_def_ref_col := x.r_col;
+        end loop;
       end loop;
       -- STATISTICS INFO
       select * into l_all_meta.table_base_stats from all_tab_statistics where table_name = upper(tab_name);
-      -- CONSTRAINTS INFO
-      /* for i in get_tab_constraints loop
-        l_base_table_cons_info.extend(1);
-        l_base_table_cons_info(l_base_table_cons_info.count) := i;
-      end loop; */
 
       -- NEW WAY
       testdata_data_infer.infer_generators(metadata => l_all_meta);
@@ -433,6 +434,18 @@ as
           l_ret_var(i).builtin_increment := l_all_meta.table_columns(i).inf_builtin_increment;
           l_ret_var(i).builtin_define_code := l_all_meta.table_columns(i).inf_builtin_define_code;
           l_ret_var(i).builtin_logic_code := l_all_meta.table_columns(i).inf_builtin_logic_code;
+        elsif l_ret_var(i).column_type = 'reference field' then
+          l_ret_var(i).reference_table := l_all_meta.table_columns(i).column_def_ref_tab;
+          l_ret_var(i).reference_column := l_all_meta.table_columns(i).column_def_ref_col;
+          l_ret_var(i).ref_dist_type := l_all_meta.table_columns(i).inf_ref_type;
+          if l_ret_var(i).ref_dist_type = 'range' then
+            l_ret_var(i).ref_dist_default := l_all_meta.table_columns(i).inf_ref_distr_start || ',' || l_all_meta.table_columns(i).inf_ref_distr_end;
+          elsif l_ret_var(i).ref_dist_type = 'weighted' then
+            l_ret_var(i).ref_dist_default := l_all_meta.table_columns(i).inf_ref_distr_start;
+          end if;
+          l_ret_var(i).ref_define_code := l_all_meta.table_columns(i).inf_ref_define_code;
+          l_ret_var(i).ref_loader_code := l_all_meta.table_columns(i).inf_ref_loader_code;
+          l_ret_var(i).ref_logic_code := l_all_meta.table_columns(i).inf_ref_logic_code;
         end if;
 
       end loop;
@@ -522,8 +535,16 @@ as
         return '|| generator_name ||'_tab
         pipelined;
 
-        procedure to_table (
-          table_name              varchar2
+        procedure to_table (';
+    if generator_table is not null then
+      l_generator_pkg_head := l_generator_pkg_head || '
+          table_name              varchar2 default ''' || generator_table || '''';
+    else
+      l_generator_pkg_head := l_generator_pkg_head || '
+          table_name              varchar2';
+    end if;
+
+    l_generator_pkg_head := l_generator_pkg_head || '
           , generator_count       number default g_default_generator_rows';
 
     for i in 1..l_generator_columns.count loop
@@ -671,8 +692,16 @@ as
 
         end to_csv;
 
-        procedure to_table (
-          table_name              varchar2
+        procedure to_table (';
+    if generator_table is not null then
+      l_generator_pkg_body := l_generator_pkg_body || '
+          table_name              varchar2 default ''' || generator_table || '''';
+    else
+      l_generator_pkg_body := l_generator_pkg_body || '
+          table_name              varchar2';
+    end if;
+
+    l_generator_pkg_body := l_generator_pkg_body || '
           , generator_count       number default g_default_generator_rows';
 
     for i in 1..l_generator_columns.count loop

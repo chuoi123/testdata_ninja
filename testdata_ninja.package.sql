@@ -55,6 +55,8 @@ as
     , col_low_high_same           number
   );
 
+  type col_chk_cons is table of varchar2(4000) index by binary_integer;
+
   type main_tab_col_meta is record (
     column_name                   varchar2(128)
     , column_type                 varchar2(128)
@@ -74,6 +76,15 @@ as
     , inf_builtin_increment       varchar2(100)
     , inf_builtin_define_code     varchar2(4000)
     , inf_builtin_logic_code      varchar2(4000)
+    , column_is_foreign           number
+    , column_def_ref_tab          varchar2(128)
+    , column_def_ref_col          varchar2(128)
+    , inf_ref_type                varchar2(128)
+    , inf_ref_distr_start         varchar2(4000)
+    , inf_ref_distr_end           varchar2(4000)
+    , inf_ref_define_code         varchar2(4000)
+    , inf_ref_loader_code         varchar2(4000)
+    , inf_ref_logic_code          varchar2(4000)
   );
   type main_tab_cols is table of main_tab_col_meta;
 

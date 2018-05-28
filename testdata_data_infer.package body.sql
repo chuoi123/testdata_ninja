@@ -2,6 +2,43 @@ create or replace package body testdata_data_infer
 
 as
 
+  function calculate_infer_data_sample (
+    metadata              in out nocopy         testdata_ninja.main_tab_meta
+    , col_idx             in                    number
+    , tab_name            in                    varchar2 default null
+  )
+  return number
+
+  as
+
+    l_tab_approx_rcount     number;
+    l_sample_count          number := 10;
+
+  begin
+    
+    -- First we check approx row count in parent table.
+    if tab_name is not null then
+      select num_rows
+      into l_tab_approx_rcount
+      from user_tab_statistics
+      where upper(table_name) = upper(tab_name);
+    else
+      select num_rows
+      into l_tab_approx_rcount
+      from user_tab_statistics
+      where upper(table_name) = upper(metadata.table_name);
+    end if;
+
+    if l_tab_approx_rcount is not null and l_tab_approx_rcount < 1000 then
+      l_sample_count := 99.99;
+    else
+      l_sample_count := round(1000/(l_tab_approx_rcount/100),2);
+    end if;
+
+    return l_sample_count;
+
+  end calculate_infer_data_sample;
+
   procedure set_initial_col_assumptions (
     metadata              in out nocopy         testdata_ninja.main_tab_meta
     , col_idx             in                    number
@@ -149,6 +186,27 @@ as
 
     l_low_val                 number := null;
     l_high_val                number := null;
+    l_sample_count            number := calculate_infer_data_sample(metadata, col_idx);
+    l_sample_sql              varchar2(4000) := 'select
+                                    max(lag_sample_col_diff)
+                                    , min(lag_sample_col_diff)
+                                    , round(avg(lag_sample_col_diff))
+                                from (
+                                  select
+                                      '|| metadata.table_columns(col_idx).column_name ||'-lag_sample_col lag_sample_col_diff
+                                  from (
+                                    select 
+                                        '|| metadata.table_columns(col_idx).column_name ||'
+                                        , lag('|| metadata.table_columns(col_idx).column_name ||', 1, null) over (order by '|| metadata.table_columns(col_idx).column_name ||') lag_sample_col
+                                    from 
+                                      '|| metadata.table_name ||' sample ('|| l_sample_count ||')
+                                  )
+                                  where 
+                                    '|| metadata.table_columns(col_idx).column_name ||'-lag_sample_col > 0
+                                )';
+    l_sample_max_diff         number;
+    l_sample_min_diff         number;
+    l_sample_avg_diff         number;
 
   begin
 
@@ -180,8 +238,14 @@ as
         metadata.table_columns(col_idx).inf_col_type := 'builtin';
         metadata.table_columns(col_idx).inf_builtin_type := 'numiterate';
         metadata.table_columns(col_idx).inf_builtin_function := 'util_random.ru_number_increment';
-        metadata.table_columns(col_idx).inf_builtin_startpoint := l_low_val; -- TODO Should be a "rescramble" so not the same as prod.
-        metadata.table_columns(col_idx).inf_builtin_increment := '1¤1'; -- TODO Should do pattern and check the increment.
+        metadata.table_columns(col_idx).inf_builtin_startpoint := util_random.ru_numerify(replace(rpad(' ', length(l_low_val), '#'), ' ', '#'));
+        -- Sample increment pattern, and try to construct similar pattern
+        execute immediate l_sample_sql into l_sample_max_diff, l_sample_min_diff, l_sample_avg_diff;
+        if l_sample_max_diff = l_sample_min_diff and l_sample_min_diff = l_sample_avg_diff then
+          metadata.table_columns(col_idx).inf_builtin_increment := l_sample_min_diff || '¤' || l_sample_max_diff;
+        else
+          metadata.table_columns(col_idx).inf_builtin_increment := core_random.r_natural(l_sample_min_diff, l_sample_avg_diff) || '¤' || core_random.r_natural(l_sample_avg_diff, l_sample_max_diff);
+        end if;
         metadata.table_columns(col_idx).inf_builtin_define_code := '
           l_bltin_' || metadata.table_columns(col_idx).column_name || ' number := ' || metadata.table_columns(col_idx).inf_builtin_startpoint || ';';
         metadata.table_columns(col_idx).inf_builtin_logic_code := '
@@ -214,6 +278,58 @@ as
 
     l_low_val                 date := null;
     l_high_val                date := null;
+    l_sample_count            number := calculate_infer_data_sample(metadata, col_idx);
+    l_always_increment        boolean := true;
+    l_is_incrementing         number := 0;
+    l_always_incr_sample_stmt varchar2(4000) := 'select
+          case
+              when ldat < '|| metadata.table_columns(col_idx).column_name ||' then 1
+              else 0
+          end iscon
+      from (
+      select 
+          '|| metadata.table_columns(col_idx).column_name ||'
+          , lead('|| metadata.table_columns(col_idx).column_name ||', 1, null) over (order by rowid) ldat
+      from '|| metadata.table_name ||' sample ('|| l_sample_count ||')
+      order by rowid)';
+    l_date_incr_data_stmt     varchar2(4000) := 'select distinct
+          rincr_type
+          , count(rincr) over (partition by rincr_type order by rincr_type) cnt_b_t
+          , avg(rincr) over (partition by rincr_type order by rincr_type) avg_b_t
+          , min(rincr) over (partition by rincr_type order by rincr_type) min_b_t
+          , max(rincr) over (partition by rincr_type order by rincr_type) max_b_t
+      from (
+      select
+          case
+              when round((ldat-'|| metadata.table_columns(col_idx).column_name ||')*86400) <= 60 then ''seconds''
+              when round((ldat-'|| metadata.table_columns(col_idx).column_name ||')*86400) <= 3600 then ''minutes''
+              when round((ldat-'|| metadata.table_columns(col_idx).column_name ||')*86400) <= 86400 then ''hours''
+              else ''days''
+          end rincr_type
+          , round((ldat-'|| metadata.table_columns(col_idx).column_name ||')*86400) rincr
+      from (
+        select 
+            '|| metadata.table_columns(col_idx).column_name ||'
+            , lead('|| metadata.table_columns(col_idx).column_name ||', 1, null) over (order by rowid) ldat
+        from '|| metadata.table_name ||' sample ('|| l_sample_count ||')
+        order by rowid
+      )
+      where ldat is not null
+      )';
+    type l_incr_data_rec is record (
+      incr_type               varchar2(4000)
+      , incr_type_count       number
+      , incr_type_avg         number
+      , incr_type_min         number
+      , incr_type_max         number
+    );
+    l_incr_data               l_incr_data_rec;
+    l_incr_high_count         number := 0;
+    l_incr_low_count          number := 0;
+    l_incr_avg_count          number := 0;
+    l_incr_most_count         number := 0;
+    l_incr_total_count        number := 0;
+    l_always_incr_ref_cursor  sys_refcursor;
 
   begin
 
@@ -244,17 +360,68 @@ as
         metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
         metadata.table_columns(col_idx).inf_col_type := 'generated';
         metadata.table_columns(col_idx).inf_col_generator := testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator;
-        metadata.table_columns(col_idx).inf_col_generator_args := replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', l_low_val), '[high]', l_high_val);
+        metadata.table_columns(col_idx).inf_col_generator_args := replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', to_char(l_low_val, 'DD-MON-YYYY HH24:MI:SS')), '[high]', to_char(l_high_val, 'DD-MON-YYYY HH24:MI:SS'));
       end if;
     end loop;
 
     if metadata.table_columns(col_idx).inf_col_generator is null then
-      -- We've reached the end without a hit in the infer. Set to default.
-      metadata.table_columns(col_idx).inf_col_domain := 'Date';
-      metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
-      metadata.table_columns(col_idx).inf_col_type := 'generated';
-      metadata.table_columns(col_idx).inf_col_generator := 'time_random.r_date';
-      metadata.table_columns(col_idx).inf_col_generator_args := null;
+      if metadata.table_columns(col_idx).column_assumptions.col_is_unique = 1 then
+        -- If all the rows are unique, we need to figure out if we are incrementing (always newer)
+        -- or if it can be old/new out of order of the insert. Assume rowid as the order col.
+        open l_always_incr_ref_cursor for l_always_incr_sample_stmt;
+        loop
+          fetch l_always_incr_ref_cursor into l_is_incrementing;
+          exit when l_always_incr_ref_cursor%notfound;
+          if l_is_incrementing = 1 then
+            -- Not always incrementing. Set to false and exit.
+            l_always_increment := false;
+            exit;
+          end if;
+        end loop;
+        close l_always_incr_ref_cursor;
+        if l_always_increment then
+          -- Set data for the date incrementer
+          metadata.table_columns(col_idx).inf_col_domain := 'Date';
+          metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
+          metadata.table_columns(col_idx).inf_col_type := 'builtin';
+          metadata.table_columns(col_idx).inf_builtin_type := 'datiterate';
+          metadata.table_columns(col_idx).inf_builtin_function := 'util_random.ru_date_increment';
+          metadata.table_columns(col_idx).inf_builtin_startpoint := to_char(l_low_val, 'DDMMYYYY-HH24:MI:SS');
+          -- Now we find out what the increment is like.
+          open l_always_incr_ref_cursor for l_date_incr_data_stmt;
+          loop
+            fetch l_always_incr_ref_cursor into l_incr_data;
+            exit when l_always_incr_ref_cursor%notfound; 
+            l_incr_total_count := l_incr_total_count + l_incr_data.incr_type_count;
+            if l_incr_data.incr_type_count > l_incr_most_count then
+              l_incr_most_count := l_incr_data.incr_type_count;
+              l_incr_high_count := l_incr_data.incr_type_max;
+              l_incr_low_count := l_incr_data.incr_type_min;
+              l_incr_avg_count := l_incr_data.incr_type_avg;
+            end if;          
+          end loop;
+          metadata.table_columns(col_idx).inf_builtin_increment := 'seconds¤'|| l_incr_low_count ||'¤'|| l_incr_high_count ||'';
+          metadata.table_columns(col_idx).inf_builtin_define_code := '
+            l_bltin_' || metadata.table_columns(col_idx).column_name || ' date := to_date(''' || metadata.table_columns(col_idx).inf_builtin_startpoint || ''', ''DDMMYYYY-HH24:MI:SS'');';
+          metadata.table_columns(col_idx).inf_builtin_logic_code := '
+            l_bltin_' || metadata.table_columns(col_idx).column_name || ' := ' || metadata.table_columns(col_idx).inf_builtin_function || '(l_bltin_' || metadata.table_columns(col_idx).column_name || ', ''' || util_random.ru_extract(metadata.table_columns(col_idx).inf_builtin_increment, 1, '¤') || ''', ' || util_random.ru_extract(metadata.table_columns(col_idx).inf_builtin_increment, 2, '¤') || ', ' || util_random.ru_extract(metadata.table_columns(col_idx).inf_builtin_increment, 3, '¤') || ');';
+        else
+          -- TODO here we should find distribution of date (year, month, day)
+          -- to build realistic dates
+          metadata.table_columns(col_idx).inf_col_domain := 'Date';
+          metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
+          metadata.table_columns(col_idx).inf_col_type := 'generated';
+          metadata.table_columns(col_idx).inf_col_generator := 'time_random.r_datebetween';
+          metadata.table_columns(col_idx).inf_col_generator_args := replace(replace('r_date_from => to_date(''[low]'',''DD-MON-YYYY HH24:MI:SS''), r_date_to => to_date(''[high]'',''DD-MON-YYYY HH24:MI:SS'')', '[low]', to_char(l_low_val, 'DD-MON-YYYY HH24:MI:SS')), '[high]', to_char(l_high_val, 'DD-MON-YYYY HH24:MI:SS'));
+        end if;
+      else
+        -- We've reached the end without a hit in the infer. Set to default.
+        metadata.table_columns(col_idx).inf_col_domain := 'Date';
+        metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
+        metadata.table_columns(col_idx).inf_col_type := 'generated';
+        metadata.table_columns(col_idx).inf_col_generator := 'time_random.r_datebetween';
+        metadata.table_columns(col_idx).inf_col_generator_args := replace(replace('r_date_from => to_date(''[low]'',''DD-MON-YYYY HH24:MI:SS''), r_date_to => to_date(''[high]'',''DD-MON-YYYY HH24:MI:SS'')', '[low]', to_char(l_low_val, 'DD-MON-YYYY HH24:MI:SS')), '[high]', to_char(l_high_val, 'DD-MON-YYYY HH24:MI:SS'));
+      end if;
     end if;
 
     dbms_application_info.set_action(null);
@@ -265,6 +432,272 @@ as
         raise;
 
   end infer_date_col;
+
+  procedure infer_foreign_key_col (
+    metadata              in out nocopy         testdata_ninja.main_tab_meta
+    , col_idx             in                    number
+  )
+
+  as
+
+    l_parent_approx_rcount    number;
+    l_do_fts_check            boolean := false;
+    l_sample_count            number := 1;
+
+    type l_sample_rec is record (
+      ref_val_dis             number
+      , ref_val_count         number
+      , ref_lowest_count      number
+      , ref_highest_count     number
+    );
+    type l_sample_tab is table of l_sample_rec;
+    l_sample_val              l_sample_tab := l_sample_tab();
+
+    type histogram_rec is record (
+      val_begin               number
+      , val_end               number
+      , occurrences           number
+      , weight                number
+    );
+    type ref_dist_hist_tab is table of histogram_rec;
+    ref_histogram             ref_dist_hist_tab := ref_dist_hist_tab();
+    l_bucket_count            number := 10;
+    l_bucket_size             number;
+
+    l_sample_data_cursor      sys_refcursor;
+
+  begin
+
+    -- First we check approx row count in parent table.
+    select num_rows
+    into l_parent_approx_rcount
+    from user_tab_statistics
+    where upper(table_name) = upper(metadata.table_columns(col_idx).column_def_ref_tab);
+
+    if l_parent_approx_rcount is not null and l_parent_approx_rcount < 1000 then
+      -- We can do a full check on all rows
+      l_do_fts_check := true;
+      l_sample_count := 99.99;
+    else
+      l_sample_count := round(1000/(l_parent_approx_rcount/100),2);
+    end if;
+
+    -- Let us check the distribution
+    open l_sample_data_cursor for 'select
+        ' || metadata.table_columns(col_idx).column_def_ref_col || '
+        , fcnt
+        , first_value(fcnt) ignore nulls over (order by fcnt) low_cnt
+        , last_value(fcnt) ignore nulls over (order by fcnt rows between
+           unbounded preceding and unbounded following) high_cnt
+      from (
+        select
+          ora_hash(a.' || metadata.table_columns(col_idx).column_def_ref_col || ') ' || metadata.table_columns(col_idx).column_def_ref_col || '
+          , count(b.' || metadata.table_columns(col_idx).column_name || ') fcnt
+        from ' || metadata.table_columns(col_idx).column_def_ref_tab || ' a
+          , ' || metadata.table_name || ' b
+        where
+          a.' || metadata.table_columns(col_idx).column_def_ref_col || ' = b.' || metadata.table_columns(col_idx).column_name || '
+        and
+          a.' || metadata.table_columns(col_idx).column_def_ref_col || ' in (
+            select 
+              ' || metadata.table_columns(col_idx).column_def_ref_col || '
+            from
+              ' || metadata.table_columns(col_idx).column_def_ref_tab || ' sample(' || l_sample_count || ')
+          )
+        group by
+          a.' || metadata.table_columns(col_idx).column_def_ref_col || '
+      )';
+    
+    fetch l_sample_data_cursor bulk collect into l_sample_val;
+
+    if (l_sample_val(1).ref_highest_count - l_sample_val(1).ref_lowest_count) <= l_sample_val(1).ref_lowest_count then
+      -- Distribution difference of child records are minimal. Just go range between low and high.
+      metadata.table_columns(col_idx).inf_ref_type := 'range';
+      metadata.table_columns(col_idx).inf_ref_distr_start := l_sample_val(1).ref_lowest_count;
+      metadata.table_columns(col_idx).inf_ref_distr_end := l_sample_val(1).ref_highest_count;
+    else
+      -- We have to do a weighted distribution. So lets bucket this up in a histogram and give it weights.
+      -- Yeah yeah I know, not optimal but at least it is a start :)
+      if l_sample_val(1).ref_highest_count < 20 then
+        l_bucket_count := 5;
+      end if;
+      l_bucket_size := round(l_sample_val(1).ref_highest_count/l_bucket_count);
+      -- Create buckets first.
+      for i in 1..l_bucket_count loop
+        ref_histogram.extend(1);
+        if i = 1 then
+          ref_histogram(i).val_begin := 1;
+          ref_histogram(i).val_end := l_bucket_size;
+        elsif i = l_bucket_count then
+          ref_histogram(i).val_begin := ref_histogram(i-1).val_end + 1;
+          ref_histogram(i).val_end := l_sample_val(1).ref_highest_count;
+        else
+          ref_histogram(i).val_begin := ref_histogram(i-1).val_end + 1;
+          ref_histogram(i).val_end := ref_histogram(i).val_begin + l_bucket_size;
+        end if;
+        ref_histogram(i).occurrences := 0;
+        ref_histogram(i).weight := 0;
+      end loop;
+      -- Building the histogram with weights as well.
+      for i in 1..l_sample_val.count loop
+        for y in 1..ref_histogram.count loop
+          if l_sample_val(i).ref_val_count between ref_histogram(y).val_begin and ref_histogram(y).val_end then
+            ref_histogram(y).occurrences := ref_histogram(y).occurrences + 1;
+            ref_histogram(y).weight := round(((ref_histogram(y).occurrences/l_sample_val.count*100)));
+            exit;
+          end if;
+        end loop;
+      end loop;
+      -- Finally we can build the weighted string for testdata_ninja
+      metadata.table_columns(col_idx).inf_ref_type := 'weighted';
+      for i in 1..ref_histogram.count loop
+        if ref_histogram(i).weight > 0 then
+          metadata.table_columns(col_idx).inf_ref_distr_start := metadata.table_columns(col_idx).inf_ref_distr_start || ',' || ref_histogram(i).occurrences || '[' || ref_histogram(i).weight || ']';
+        end if;
+      end loop;
+      metadata.table_columns(col_idx).inf_ref_distr_start := substr(metadata.table_columns(col_idx).inf_ref_distr_start, 2);
+    end if;
+
+    close l_sample_data_cursor;
+
+    -- Now we have the referential distribution. We have already infered a generator
+    -- so we need to build some special logic for this one. Since we are basing this
+    -- on an existing table, we need to allow for the fact that the parent table
+    -- does not exist, so the code need to assert that and if not, then generate
+    -- values instead of using an existing table.
+    metadata.table_columns(col_idx).inf_col_type := 'reference field';
+
+    -- When we build the logic for the code to handle a foreign key,
+    -- we include the option to ignore relationship and just generate values
+    -- from the initial inferred generator.
+    -- TODO: REMOVE this code from here. Does not really belong here.
+
+    -- Variable and cursor definitions for ref code.
+    metadata.table_columns(col_idx).inf_ref_define_code := '
+      type t_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_c_tab is table of number index by varchar2(4000);
+      l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list t_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_c_tab;
+      l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx varchar2(4000);';
+
+    if metadata.table_columns(col_idx).inf_ref_type = 'simple' then
+      metadata.table_columns(col_idx).inf_ref_define_code := metadata.table_columns(col_idx).inf_ref_define_code ||'
+        l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := round(generator_count/dist_' || substr(metadata.table_columns(col_idx).column_name, 1, 15) ||');';
+    elsif metadata.table_columns(col_idx).inf_ref_type = 'range' then
+      metadata.table_columns(col_idx).inf_ref_define_code := metadata.table_columns(col_idx).inf_ref_define_code ||'
+        l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := generator_count;
+        l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := 0;
+        l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := substr(dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) ||', 1, instr(dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) ||', '','') - 1);
+        l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := substr(dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) ||', instr(dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) ||', '','') + 1);';
+    elsif metadata.table_columns(col_idx).inf_ref_type = 'weighted' then
+      metadata.table_columns(col_idx).inf_ref_define_code := metadata.table_columns(col_idx).inf_ref_define_code ||'
+        l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := generator_count;
+        l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := 0;
+        l_ref_weighted_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' varchar2(4000) := dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) || ';';
+    end if;
+    metadata.table_columns(col_idx).inf_ref_define_code := metadata.table_columns(col_idx).inf_ref_define_code ||'
+      l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||' sys_refcursor;
+      l_ref_stmt_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||' varchar2(4000) := ''
+        select ' || metadata.table_columns(col_idx).column_def_ref_col || ' as ref_dist_col
+        from (
+          select ' || metadata.table_columns(col_idx).column_def_ref_col || '
+          from ' || metadata.table_columns(col_idx).column_def_ref_tab || '
+          order by dbms_random.value
+        )
+        where rownum <= ''|| generator_count;
+    ';
+
+    -- Now we build the loading of the reference data code.
+    -- Only load the lists of data if the data being referenced exists. If it does not exist
+    -- have exception code ready in the value block to just use a default generator.
+    metadata.table_columns(col_idx).inf_ref_loader_code := '
+      begin
+        if dbms_assert.sql_object_name('''|| metadata.table_columns(col_idx).column_def_ref_tab ||''') = ''' || metadata.table_columns(col_idx).column_def_ref_tab || ''' and dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) || ' is not null then
+          open l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||' for l_ref_stmt_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||';
+          loop
+            fetch l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||' into l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx;
+            exit when l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||'%notfound;';
+    if metadata.table_columns(col_idx).inf_ref_type = 'simple' then
+      metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
+          l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx) := dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) ||';
+      ';
+    elsif metadata.table_columns(col_idx).inf_ref_type = 'range' then
+      -- For range we do a r_natural based on input. Always keeping track of total
+      -- count so we only generate the required rows in the child table.
+      metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
+            l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx) := core_random.r_natural(l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ', l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ');';
+      
+      metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
+            l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' + l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx);
+            if l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' > l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+              l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := 1;
+              l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ';
+            elsif l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' > l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+              l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ';
+            end if;
+            if l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' >= l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+              exit;
+            end if;';
+    elsif metadata.table_columns(col_idx).inf_ref_type = 'weighted' then
+      -- for weighted we do a random_util pick weighted.
+      metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
+            l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx) := util_random.ru_pickone_weighted(l_ref_weighted_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ');';
+      
+      metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
+            l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' + l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx);
+            if l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' > l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+              l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := 1;
+              l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ';
+            elsif l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' > l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+              l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' := l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ';
+            end if;
+            if l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' >= l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+              exit;
+            end if;';
+    end if;
+    metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
+          end loop;
+          close l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||';
+          l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx := l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list.first;
+        end if;
+        exception
+          when others then
+            null;
+      end;
+    ';
+
+    -- Now we build the logic of reference values
+    metadata.table_columns(col_idx).inf_ref_logic_code := '
+            begin
+              if dbms_assert.sql_object_name('''|| metadata.table_columns(col_idx).column_def_ref_tab ||''') = ''' || metadata.table_columns(col_idx).column_def_ref_tab || ''' and dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) || ' is not null then
+                l_ret_var.' || metadata.table_columns(col_idx).column_name || ' := l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx;
+                l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx) := l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx) - 1;
+                if l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx) = 0 then
+                  l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx := l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list.next(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx);
+                end if;
+              else';
+    if metadata.table_columns(col_idx).inf_col_generator_args is not null then
+      metadata.table_columns(col_idx).inf_ref_logic_code := metadata.table_columns(col_idx).inf_ref_logic_code ||'
+                  l_ret_var.' || metadata.table_columns(col_idx).column_name || ' := '|| metadata.table_columns(col_idx).inf_col_generator || '(' || metadata.table_columns(col_idx).inf_col_generator_args || ');';
+    else
+      metadata.table_columns(col_idx).inf_ref_logic_code := metadata.table_columns(col_idx).inf_ref_logic_code ||'
+                  l_ret_var.' || metadata.table_columns(col_idx).column_name || ' := '|| metadata.table_columns(col_idx).inf_col_generator || ';';
+    end if;
+    metadata.table_columns(col_idx).inf_ref_logic_code := metadata.table_columns(col_idx).inf_ref_logic_code ||'
+              end if;
+              exception
+                when others then
+    ';
+    if metadata.table_columns(col_idx).inf_col_generator_args is not null then
+      metadata.table_columns(col_idx).inf_ref_logic_code := metadata.table_columns(col_idx).inf_ref_logic_code ||'
+                  l_ret_var.' || metadata.table_columns(col_idx).column_name || ' := '|| metadata.table_columns(col_idx).inf_col_generator || '(' || metadata.table_columns(col_idx).inf_col_generator_args || ');';
+    else
+      metadata.table_columns(col_idx).inf_ref_logic_code := metadata.table_columns(col_idx).inf_ref_logic_code ||'
+                  l_ret_var.' || metadata.table_columns(col_idx).column_name || ' := '|| metadata.table_columns(col_idx).inf_col_generator || ';';
+    end if;
+    metadata.table_columns(col_idx).inf_ref_logic_code := metadata.table_columns(col_idx).inf_ref_logic_code ||'
+            end;
+    ';
+
+  end infer_foreign_key_col;
 
   procedure infer_table_domain (
     metadata             in out nocopy        testdata_ninja.main_tab_meta
@@ -325,16 +758,20 @@ as
       elsif metadata.table_columns(c).column_type = 'DATE' then
         infer_date_col(metadata, c);
       end if;
+      -- If column is a foreign key, we need to investigate the distribution for this.
+      if metadata.table_columns(c).column_is_foreign = 1 then
+        infer_foreign_key_col(metadata, c);
+      end if;
       -- Set the final assumptions and generic settings.
       set_final_col_assumptions(metadata, c);
     end loop;
 
     dbms_application_info.set_action(null);
 
-    exception
+    /*exception
       when others then
         dbms_application_info.set_action(null);
-        raise;
+        raise;*/
 
   end infer_generators;
 

@@ -291,7 +291,7 @@ as
     ';
     -- Now we build the logic of reference values
     generator_definition(column_idx).ref_logic_code := '
-        generator_definition.' || generator_definition(column_idx).column_name || ' := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx;
+        l_ret_var.' || generator_definition(column_idx).column_name || ' := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx;
         l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx) := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx) - 1;
         if l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx) = 0 then
           l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list.next(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx);
@@ -388,7 +388,7 @@ as
     ';
     -- Now we build the logic of reference values
     generator_definition(column_idx).ref_logic_code := '
-        generator_definition.' || generator_definition(column_idx).column_name || ' := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx;
+        l_ret_var.' || generator_definition(column_idx).column_name || ' := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx;
         l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx) := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx) - 1;
         if l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx) = 0 then
           l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx := l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list.next(l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list_idx);
