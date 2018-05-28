@@ -4,3 +4,4 @@
 *.sublime-project
 .qs_commands
 temp/
+testdata_workspace.code-workspace
