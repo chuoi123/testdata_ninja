@@ -4,10 +4,10 @@ as
 
   /** Helper functions to build individual functionality of the testdata generator.
   * @author Morten Egan
-  * @version 0.0.1
+  * @version 1.0.0
   * @project TESTDATA_NINJA
   */
-  npg_version         varchar2(250) := '0.0.1';
+  npg_version         varchar2(250) := '1.0.0';
 
   /** Help generate the necesarry values for a builtin generator.
   * @author Morten Egan

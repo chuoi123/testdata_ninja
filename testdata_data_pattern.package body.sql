@@ -86,11 +86,6 @@ as
 
     dbms_application_info.set_action(null);
 
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
-
   end find_known_pattern_in_col;
 
   procedure guess_pattern_in_col (
@@ -167,10 +162,12 @@ as
         , max(allcount) over (partition by sepcount) as maxallcountbysep
         , case
             when wcount-sepcount = 1 then regexp_replace(regexp_replace('|| metadata.table_columns(col_idx).column_name ||', ''\d'', ''#''), ''[a-zA-Z]'', ''?'')
+            when (wcount-sepcount = 0 and sepcount = 1) then regexp_replace(regexp_replace('|| metadata.table_columns(col_idx).column_name ||', ''\d'', ''#''), ''[a-zA-Z]'', ''?'')
             else null
           end patternized
         , case
             when (wcount-sepcount = 1 and sepcount > 0) then regexp_substr('|| metadata.table_columns(col_idx).column_name ||', ''[-_/\|]'')
+            when (wcount-sepcount = 0 and sepcount = 1) then regexp_substr('|| metadata.table_columns(col_idx).column_name ||', ''[-_/\|]'')
             else null
           end sepvalue
       from (
@@ -194,6 +191,15 @@ as
         end if;
         if l_sample_data(i).seperator_avg_count > 0 then
           l_id_word_pattern := true;
+        end if;
+      end if;
+      if l_sample_data(i).patternized is not null then
+        metadata.table_columns(col_idx).inf_col_type := 'generated';
+        metadata.table_columns(col_idx).inf_col_generator := 'util_random.ru_numcharfy';
+        if l_sample_data(i).caps_count > 0 and l_sample_data(i).low_count = 0 then
+          metadata.table_columns(col_idx).inf_col_generator_args := 'ru_string => ''' || l_sample_data(i).patternized || ''', ru_upper => true';
+        else
+          metadata.table_columns(col_idx).inf_col_generator_args := 'ru_string => ''' || l_sample_data(i).patternized || ''', ru_upper => false';
         end if;
       end if;
     end loop;

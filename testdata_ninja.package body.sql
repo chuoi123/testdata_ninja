@@ -309,6 +309,7 @@ as
 
   function parse_cols_from_table (
     tab_name                in        varchar2
+    , tab_owner             in        varchar2
   )
   return generator_columns
 
@@ -331,13 +332,17 @@ as
     l_str_stop_len          number := 20;
 
     cursor get_col_info is
-      select * from all_tab_cols
+      select
+        *
+      from all_tab_cols
       where table_name = upper(tab_name)
+      and owner = upper(tab_owner)
       order by column_id;
 
     cursor get_col_stats_info is
-      select * from user_tab_col_statistics
-      where table_name = upper(tab_name);
+      select * from all_tab_col_statistics
+      where table_name = upper(tab_name)
+      and owner = upper(tab_owner);
 
     cursor get_col_ref_constraint(col_name varchar2) is
       select
@@ -364,6 +369,34 @@ as
       and
         a.column_name = upper(col_name);
 
+    cursor get_col_is_check(col_name varchar2) is
+      select 
+        count(a.table_name)
+      from 
+        user_constraints a
+      join
+        user_cons_columns b on a.table_name = b.table_name and a.constraint_name = b.constraint_name
+      where
+        a.constraint_type = 'C'
+      and
+        a.table_name = upper(tab_name)
+      and 
+        b.column_name = upper(col_name);
+
+    cursor get_col_is_unique(col_name varchar2) is
+      select 
+        count(a.table_name)
+      from 
+        user_constraints a
+      join
+        user_cons_columns b on a.table_name = b.table_name and a.constraint_name = b.constraint_name
+      where
+        a.constraint_type in ('P', 'U')
+      and
+        a.table_name = upper(tab_name)
+      and 
+        b.column_name = upper(col_name);
+
     l_all_meta                      main_tab_meta;
 
   begin
@@ -376,25 +409,38 @@ as
       -- for use in generating a format as close to real life as possible.
       l_all_meta.table_name := upper(tab_name);
       -- BASE INFO
-      select * into l_all_meta.table_base_data from all_tables where table_name = upper(tab_name);
+      select * into l_all_meta.table_base_data from all_tables where table_name = upper(tab_name) and owner = upper(tab_owner);
       l_all_meta.table_columns := main_tab_cols();
       for i in get_col_info loop
         l_all_meta.table_columns.extend(1);
         l_all_meta.table_columns(l_all_meta.table_columns.count).column_name := i.column_name;
-        l_all_meta.table_columns(l_all_meta.table_columns.count).column_type := i.data_type;
+        case
+          when i.data_type = 'CHAR' then l_all_meta.table_columns(l_all_meta.table_columns.count).column_type := 'VARCHAR2';
+          else l_all_meta.table_columns(l_all_meta.table_columns.count).column_type := i.data_type;
+        end case;
+        -- l_all_meta.table_columns(l_all_meta.table_columns.count).column_type := case i.data_type when 'CHAR' then 'VARCHAR2' else i.data_type end case;
         l_all_meta.table_columns(l_all_meta.table_columns.count).column_base_data := i;
         select * into l_all_meta.table_columns(l_all_meta.table_columns.count).column_base_stats
         from all_tab_col_statistics
         where table_name = upper(tab_name)
+        and owner = upper(tab_owner)
         and column_name = i.column_name;
         for x in get_col_ref_constraint(i.column_name) loop
           l_all_meta.table_columns(l_all_meta.table_columns.count).column_is_foreign := 1;
           l_all_meta.table_columns(l_all_meta.table_columns.count).column_def_ref_tab := x.r_table_name;
           l_all_meta.table_columns(l_all_meta.table_columns.count).column_def_ref_col := x.r_col;
         end loop;
+        -- Check constraint flag
+        open get_col_is_check(i.column_name);
+        fetch get_col_is_check into l_all_meta.table_columns(l_all_meta.table_columns.count).column_is_check;
+        close get_col_is_check;
+        -- Unique flag
+        open get_col_is_unique(i.column_name);
+        fetch get_col_is_unique into l_all_meta.table_columns(l_all_meta.table_columns.count).column_is_unique;
+        close get_col_is_unique;
       end loop;
       -- STATISTICS INFO
-      select * into l_all_meta.table_base_stats from all_tab_statistics where table_name = upper(tab_name);
+      select * into l_all_meta.table_base_stats from all_tab_statistics where table_name = upper(tab_name) and owner = upper(tab_owner);
 
       -- NEW WAY
       testdata_data_infer.infer_generators(metadata => l_all_meta);
@@ -415,6 +461,7 @@ as
         -- Data type
         case l_all_meta.table_columns(i).column_type
           when 'VARCHAR2' then l_ret_var(i).data_type := l_all_meta.table_columns(i).column_base_data.data_type || '(' || l_all_meta.table_columns(i).column_base_data.data_length || ')';
+          when 'CHAR'  then l_ret_var(i).data_type := 'VARCHAR2' || '(' || l_all_meta.table_columns(i).column_base_data.data_length || ')';
           else l_ret_var(i).data_type := l_all_meta.table_columns(i).column_base_data.data_type;
         end case;
 
@@ -424,6 +471,11 @@ as
           l_ret_var(i).generator_args := l_all_meta.table_columns(i).inf_col_generator_args;
           if l_all_meta.table_columns(i).inf_col_generator_nullable is not null then
             l_ret_var(i).generator_nullable := l_all_meta.table_columns(i).inf_col_generator_nullable;
+          end if;
+          if l_all_meta.table_columns(i).column_is_unique > 0 then
+            l_ret_var(i).column_rule := 'U';
+            l_ret_var(i).builtin_define_code := l_all_meta.table_columns(i).inf_unique_define_code;
+            l_ret_var(i).builtin_logic_code := l_all_meta.table_columns(i).inf_unique_logic_code;
           end if;
         elsif l_ret_var(i).column_type = 'fixed' then
           l_ret_var(i).fixed_value := l_all_meta.table_columns(i).inf_fixed_value;
@@ -467,6 +519,7 @@ as
     generator_name              in        varchar2
     , generator_format          in        varchar2 default null
     , generator_table           in        varchar2 default null
+    , generator_table_owner     in        varchar2 default user
   )
 
   as
@@ -478,6 +531,7 @@ as
     l_generator_first_col       boolean := true;
     l_column_order              topological_ninja.topo_number_list := topological_ninja.topo_number_list();
     l_build_idx                 number;
+    l_row_stmt                  varchar2(4000);
 
   begin
 
@@ -486,10 +540,11 @@ as
     if generator_table is null and generator_format is not null then
       l_generator_columns := parse_generator_cols(generator_format, l_column_order);
     elsif generator_format is null and generator_table is not null then
-      l_generator_columns := parse_cols_from_table(generator_table);
+      l_generator_columns := parse_cols_from_table(generator_table, generator_table_owner);
     end if;
 
     l_generator_pkg_head := 'create or replace package tdg_'|| generator_name ||'
+      authid current_user
       as
         g_default_generator_rows      number := '|| g_default_generator_rows ||';
 
@@ -531,6 +586,7 @@ as
     end loop;
 
     l_generator_pkg_head := l_generator_pkg_head || '
+            , maintain_uniqueness boolean default true
         )
         return '|| generator_name ||'_tab
         pipelined;
@@ -545,7 +601,8 @@ as
     end if;
 
     l_generator_pkg_head := l_generator_pkg_head || '
-          , generator_count       number default g_default_generator_rows';
+          , generator_count       number default g_default_generator_rows
+          , predictable_key       varchar2 default to_char(systimestamp,''FFSSMIHH24DDMMYYYY'') || sys_context(''USERENV'', ''SESSIONID'')';
 
     for i in 1..l_generator_columns.count loop
       if l_generator_columns(i).column_type = 'reference field' then
@@ -702,7 +759,8 @@ as
     end if;
 
     l_generator_pkg_body := l_generator_pkg_body || '
-          , generator_count       number default g_default_generator_rows';
+          , generator_count       number default g_default_generator_rows
+          , predictable_key       varchar2 default to_char(systimestamp,''FFSSMIHH24DDMMYYYY'') || sys_context(''USERENV'', ''SESSIONID'')';
 
     for i in 1..l_generator_columns.count loop
       if l_generator_columns(i).column_type = 'reference field' then
@@ -734,7 +792,7 @@ as
         begin
 
           if dbms_assert.simple_sql_name(table_name) = table_name then
-            l_to_table_stmt := ''create table '' || table_name || '' as select * from table(tdg_'|| generator_name ||'.'|| generator_name ||'(''|| generator_count ||''))'';
+            l_to_table_stmt := ''create table '' || table_name || '' as select * from table(tdg_'|| generator_name ||'.'|| generator_name ||'(''|| generator_count ||'', ''''''|| predictable_key ||''''''))'';
             l_drop_table_stmt := ''drop table '' || table_name || '' cascade constraints purge'';
 
             execute immediate l_to_table_stmt;
@@ -772,6 +830,7 @@ as
     end loop;
 
     l_generator_pkg_body := l_generator_pkg_body || '
+            , maintain_uniqueness boolean default true
         )
         return '|| generator_name ||'_tab
         pipelined
@@ -788,6 +847,8 @@ as
       elsif l_generator_columns(i).column_type = 'builtin' then
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
       elsif l_generator_columns(i).column_type = 'referencelist' and l_generator_columns(i).builtin_define_code is not null then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
+      elsif l_generator_columns(i).column_type = 'generated' and l_generator_columns(i).column_rule = 'U' then
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
       end if;
     end loop;
@@ -827,45 +888,41 @@ as
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(l_build_idx).ref_logic_code;
       elsif l_generator_columns(l_build_idx).column_type = 'fixed' then
         if l_generator_columns(l_build_idx).data_type = 'number' then
-          l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).fixed_value || ';';
+          l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).fixed_value || ';';
         else
-          l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ''' || l_generator_columns(l_build_idx).fixed_value || ''';';
+          l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ''' || l_generator_columns(l_build_idx).fixed_value || ''';';
         end if;
       elsif l_generator_columns(l_build_idx).column_type = 'builtin' then
-        l_generator_pkg_body := l_generator_pkg_body || '
-          l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := l_bltin_' || l_generator_columns(l_build_idx).column_name || ';' || l_generator_columns(l_build_idx).builtin_logic_code;
+        l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := l_bltin_' || l_generator_columns(l_build_idx).column_name || ';' || l_generator_columns(l_build_idx).builtin_logic_code;
       elsif l_generator_columns(l_build_idx).column_type = 'referencelist' then
         if l_generator_columns(l_build_idx).builtin_define_code is null then
-          l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(''' || l_generator_columns(l_build_idx).fixed_value || ''');';
+          l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(''' || l_generator_columns(l_build_idx).fixed_value || ''');';
         else
-          l_generator_pkg_body := l_generator_pkg_body || '
-            l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(l_bltin_' || l_generator_columns(l_build_idx).column_name || ');';
+          l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(l_bltin_' || l_generator_columns(l_build_idx).column_name || ');';
         end if;
-      else
-        if l_generator_columns(l_build_idx).column_type != 'referencelist' then
+      elsif l_generator_columns(l_build_idx).column_type = 'generated' then
         -- Check if we need to add arguments or not and if nullable is enabled.
-          if l_generator_columns(l_build_idx).generator_nullable is not null then
-            if l_generator_columns(l_build_idx).generator_args is not null then
-              l_generator_pkg_body := l_generator_pkg_body || '
-                case when core_random.r_bool('|| l_generator_columns(l_build_idx).generator_nullable ||') then l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := null; else l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '(' || l_generator_columns(l_build_idx).generator_args || '); end case;';
-            else
-              l_generator_pkg_body := l_generator_pkg_body || '
-                case when core_random.r_bool('|| l_generator_columns(l_build_idx).generator_nullable ||') then l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := null; else l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '; end case;';
-            end if;
+        if l_generator_columns(l_build_idx).generator_nullable is not null then
+          if l_generator_columns(l_build_idx).generator_args is not null then
+            l_row_stmt := 'case when core_random.r_bool('|| l_generator_columns(l_build_idx).generator_nullable ||') then l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := null; else l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '(' || l_generator_columns(l_build_idx).generator_args || '); end case;';
           else
-            if l_generator_columns(l_build_idx).generator_args is not null then
-              l_generator_pkg_body := l_generator_pkg_body || '
-                l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '(' || l_generator_columns(l_build_idx).generator_args || ');';
-            else
-              l_generator_pkg_body := l_generator_pkg_body || '
-                l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || ';';
-            end if;
+            l_row_stmt := 'case when core_random.r_bool('|| l_generator_columns(l_build_idx).generator_nullable ||') then l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := null; else l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '; end case;';
+          end if;
+        else
+          if l_generator_columns(l_build_idx).generator_args is not null then
+            l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || '(' || l_generator_columns(l_build_idx).generator_args || ');';
+          else
+            l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := ' || l_generator_columns(l_build_idx).generator || ';';
           end if;
         end if;
+        -- For generated and unique columns, we need to add the maintain_unique_code
+        if l_generator_columns(i).column_type = 'generated' and l_generator_columns(i).column_rule = 'U' then
+          l_row_stmt := replace(l_generator_columns(i).builtin_logic_code, '##col_set_code##', l_row_stmt);
+        end if;
       end if;
+      -- Add the row generation stmt here
+      l_generator_pkg_body := l_generator_pkg_body || '
+            ' || l_row_stmt;
     end loop;
 
     l_generator_pkg_body := l_generator_pkg_body || '

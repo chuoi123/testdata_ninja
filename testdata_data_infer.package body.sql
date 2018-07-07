@@ -127,15 +127,39 @@ as
     metadata.table_columns(col_idx).inf_col_domain := 'Text';
     metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
 
-    -- Check if we are dealing with a hit in data domain.
+    -- Check if we are dealing with a hit in data domain directly.
     for i in 1..testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type).count loop
       if util_random.ru_inlist(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_name_hit, metadata.table_columns(col_idx).column_name) then
-        -- We hit a generated domain.
+        -- We hit a generated domain directly.
         metadata.table_columns(col_idx).inf_col_type := 'generated';
         metadata.table_columns(col_idx).inf_col_generator := testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator;
-        metadata.table_columns(col_idx).inf_col_generator_args := replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', l_low_val), '[high]', l_high_val);
+        if testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_args_condition = 1 then
+          execute immediate replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', l_low_val), '[high]', l_high_val)
+          into metadata.table_columns(col_idx).inf_col_generator_args;
+        else
+          metadata.table_columns(col_idx).inf_col_generator_args := replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', l_low_val), '[high]', l_high_val);
+        end if;
       end if;
     end loop;
+
+    -- We basically repeat same loop as above if generator is null
+    -- but this time allowing for partial matching.
+    -- TODO: In future should make this less repetative
+    if metadata.table_columns(col_idx).inf_col_generator is null then
+      for i in 1..testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type).count loop
+        if util_random.ru_inlist(ru_elements => testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_name_hit, ru_value => metadata.table_columns(col_idx).column_name, ru_partial_hit => true) then
+          -- We hit a generated with partial match.
+          metadata.table_columns(col_idx).inf_col_type := 'generated';
+          metadata.table_columns(col_idx).inf_col_generator := testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator;
+          if testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_args_condition = 1 then
+            execute immediate replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', l_low_val), '[high]', l_high_val)
+            into metadata.table_columns(col_idx).inf_col_generator_args;
+          else
+            metadata.table_columns(col_idx).inf_col_generator_args := replace(replace(testdata_generator_domains.g_column_domains(metadata.table_columns(col_idx).column_type)(i).col_generator_args, '[low]', l_low_val), '[high]', l_high_val);
+          end if;
+        end if;
+      end loop;
+    end if;
 
     if metadata.table_columns(col_idx).inf_col_generator is null then
       -- If we have not yet infered a column generator (based on simple naming of columns)
@@ -168,12 +192,28 @@ as
       end if;
     end if;
 
-    dbms_application_info.set_action(null);
+    -- Now that we have the generator defined
+    -- We need to check if we need to track uniqueness.
+    -- If so, we need to create the define and logic code.
+    if metadata.table_columns(col_idx).column_is_unique > 0 and metadata.table_columns(col_idx).inf_col_type = 'generated' then
+      -- Define code
+      metadata.table_columns(col_idx).inf_unique_define_code := '
+        type t_' || metadata.table_columns(col_idx).column_name || '_u_tab is table of number(1) index by varchar2(4000);
+        l_' || metadata.table_columns(col_idx).column_name || '_u t_' || metadata.table_columns(col_idx).column_name || '_u_tab;';
+      -- Logic code
+      metadata.table_columns(col_idx).inf_unique_logic_code := '
+        if maintain_uniqueness then
+          ##col_set_code##
+          while l_' || metadata.table_columns(col_idx).column_name || '_u.exists(l_ret_var.' || metadata.table_columns(col_idx).column_name || ') loop
+            ##col_set_code##
+          end loop;
+          l_' || metadata.table_columns(col_idx).column_name || '_u(l_ret_var.' || metadata.table_columns(col_idx).column_name || ') := 1;
+        else
+          ##col_set_code##
+        end if;';
+    end if;
 
-    exception
-      when others then
-        dbms_application_info.set_action(null);
-        raise;
+    dbms_application_info.set_action(null);
 
   end infer_varchar_col;
 
@@ -518,8 +558,10 @@ as
     else
       -- We have to do a weighted distribution. So lets bucket this up in a histogram and give it weights.
       -- Yeah yeah I know, not optimal but at least it is a start :)
-      if l_sample_val(1).ref_highest_count < 20 then
-        l_bucket_count := 5;
+      if l_sample_val(1).ref_highest_count - l_sample_val(1).ref_lowest_count < 10 then
+        l_bucket_count := 2;
+      elsif l_sample_val(1).ref_highest_count < 20 then
+        l_bucket_count := 4;
       end if;
       l_bucket_size := round(l_sample_val(1).ref_highest_count/l_bucket_count);
       -- Create buckets first.
@@ -591,7 +633,9 @@ as
       metadata.table_columns(col_idx).inf_ref_define_code := metadata.table_columns(col_idx).inf_ref_define_code ||'
         l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := generator_count;
         l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := 0;
-        l_ref_weighted_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' varchar2(4000) := dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) || ';';
+        l_ref_weighted_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' varchar2(4000) := dist_'|| substr(metadata.table_columns(col_idx).column_name, 1, 15) || ';
+        l_ref_min_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := 1;
+        l_ref_max_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' number := 1;';
     end if;
     metadata.table_columns(col_idx).inf_ref_define_code := metadata.table_columns(col_idx).inf_ref_define_code ||'
       l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||' sys_refcursor;
@@ -656,6 +700,9 @@ as
     metadata.table_columns(col_idx).inf_ref_loader_code := metadata.table_columns(col_idx).inf_ref_loader_code || '
           end loop;
           close l_ref_cur_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) ||';
+          if l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' < l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' then
+            l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list.last) := l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list(l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list.last) + (l_ref_distr_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ' - l_ref_track_' || substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || ');
+          end if;
           l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list_idx := l_'|| substr(metadata.table_columns(col_idx).column_def_ref_col, 1, 15) || '_list.first;
         end if;
         exception
@@ -698,6 +745,74 @@ as
     ';
 
   end infer_foreign_key_col;
+
+  procedure infer_check_constraint_col (
+    metadata              in out nocopy         testdata_ninja.main_tab_meta
+    , col_idx             in                    number
+  )
+
+  as
+
+    cursor get_all_check_cons is
+      select 
+        a.table_name
+        , b.column_name
+        , a.search_condition_vc 
+      from 
+        user_constraints a
+      join
+        user_cons_columns b on a.table_name = b.table_name and a.constraint_name = b.constraint_name
+      where 
+        a.constraint_type = 'C'
+      and
+        b.column_name = metadata.table_columns(col_idx).column_name
+      and
+        a.table_name = metadata.table_name;
+
+    l_cleaned_check_cons      varchar2(32000);
+    l_reference_others        boolean := false;
+    l_reference_own           boolean := false;
+
+  begin
+      
+      for i in get_all_check_cons loop
+        -- Removing crappy chars from check constraint code.
+        l_cleaned_check_cons := trim(replace(l_cleaned_check_cons, '"'));
+        -- Check col references
+        for i in 1..metadata.table_columns.count loop
+          if metadata.table_columns(i).column_name != metadata.table_columns(col_idx).column_name then
+            if instr(upper(l_cleaned_check_cons), metadata.table_columns(i).column_name) > 0 then
+              -- Referencing others
+              l_reference_others := true;
+            end if;
+          else
+            if instr(upper(l_cleaned_check_cons), metadata.table_columns(i).column_name) > 0 then
+              -- Referencing others
+              l_reference_own := true;
+            end if;
+          end if;
+        end loop;
+
+        if l_reference_own and not l_reference_others then
+          -- Only dealing with own column
+          if instr(upper(l_cleaned_check_cons), metadata.table_columns(col_idx).column_name || ' IS NOT NULL') > 0 then
+            -- Make sure column is not nullable.
+            metadata.table_columns(col_idx).inf_col_generator_nullable := null;
+          end if;
+          if instr(upper(l_cleaned_check_cons), metadata.table_columns(col_idx).column_name || ' IN (') > 0 then
+            -- If not already a list, convert this column to a limited value list as per check constraint.
+            null;
+          end if;
+        elsif l_reference_others and not l_reference_own then
+          -- Only dealing with others
+          null;
+        elsif l_reference_others and l_reference_own then
+          -- Dealing with both own and others
+          null;
+        end if;
+      end loop;
+  
+  end infer_check_constraint_col;
 
   procedure infer_table_domain (
     metadata             in out nocopy        testdata_ninja.main_tab_meta
@@ -764,6 +879,17 @@ as
       end if;
       -- Set the final assumptions and generic settings.
       set_final_col_assumptions(metadata, c);
+    end loop;
+
+    -- Now that we have build the initial assumptions
+    -- and inferred generators, we make another pass through
+    -- to make sure we can satisfy check constraints. The reason
+    -- we need a second pass is that check constraints could have been
+    -- referencing columns not yet inferred and so no data yet.
+    for c in 1..metadata.table_columns.count loop
+      if metadata.table_columns(c).column_is_check >= 1 then
+        infer_check_constraint_col(metadata, c);
+      end if;
     end loop;
 
     dbms_application_info.set_action(null);

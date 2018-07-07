@@ -4,10 +4,10 @@ as
 
   /** Default generators available in the testdata_ninja package.
   * @author Morten Egan
-  * @version 0.0.1
+  * @version 1.0.0
   * @project TESTDATA_NINJA
   */
-  npg_version         varchar2(250) := '0.0.1';
+  npg_version         varchar2(250) := '1.0.0';
 
   -- Globals
   g_default_generator_rows        number := 500;

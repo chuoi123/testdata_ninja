@@ -1,13 +1,14 @@
 create or replace package testdata_ninja
+authid current_user
 
 as
 
   /** Main package of the testdata code. Generators are defined here.
   * @author Morten Egan
-  * @version 0.0.1
+  * @version 1.0.0
   * @project TESTDATA_NINJA
   */
-  npg_version         varchar2(250) := '0.0.1';
+  npg_version         varchar2(250) := '1.0.0';
 
   -- Keep track of input values.
   type track_input_rec is record (
@@ -85,6 +86,10 @@ as
     , inf_ref_define_code         varchar2(4000)
     , inf_ref_loader_code         varchar2(4000)
     , inf_ref_logic_code          varchar2(4000)
+    , column_is_check             number
+    , column_is_unique            number
+    , inf_unique_define_code      varchar2(4000)
+    , inf_unique_logic_code       varchar2(4000)
   );
   type main_tab_cols is table of main_tab_col_meta;
 
@@ -100,6 +105,7 @@ as
     column_name           varchar2(500)
     , data_type           varchar2(500)
     , column_type         varchar2(500)
+    , column_rule         varchar2(4000)
     , generator           varchar2(500)
     , generator_args      varchar2(500)
     , generator_nullable  number
@@ -140,6 +146,7 @@ as
     generator_name              in        varchar2
     , generator_format          in        varchar2 default null
     , generator_table           in        varchar2 default null
+    , generator_table_owner     in        varchar2 default user
   );
 
 end testdata_ninja;

@@ -1,4 +1,4 @@
-create or replace package body testdata_generator_domains
+ create or replace package body testdata_generator_domains
 
 as
 
@@ -12,25 +12,43 @@ begin
   -- COLUMN DOMAINS
   -- varchar2
   g_column_domains('VARCHAR2') := col_domain_tab();
-  g_column_domains('VARCHAR2').extend(6);
+  g_column_domains('VARCHAR2').extend(9);
   g_column_domains('VARCHAR2')(1).col_name_hit := 'FNAME,FIRSTNAME,FIRST_NAME';
   g_column_domains('VARCHAR2')(1).col_generator := 'person_random.r_firstname';
   g_column_domains('VARCHAR2')(1).col_generator_args := null;
+  g_column_domains('VARCHAR2')(1).col_args_condition := 0;
   g_column_domains('VARCHAR2')(2).col_name_hit := 'LNAME,LASTNAME,LAST_NAME,ENAME';
   g_column_domains('VARCHAR2')(2).col_generator := 'person_random.r_lastname';
   g_column_domains('VARCHAR2')(2).col_generator_args := null;
+  g_column_domains('VARCHAR2')(2).col_args_condition := 0;
   g_column_domains('VARCHAR2')(3).col_name_hit := 'FULLNAME,FULL_NAME';
   g_column_domains('VARCHAR2')(3).col_generator := 'person_random.r_name';
   g_column_domains('VARCHAR2')(3).col_generator_args := null;
+  g_column_domains('VARCHAR2')(3).col_args_condition := 0;
   g_column_domains('VARCHAR2')(4).col_name_hit := 'CNTRY,COUNTRY,CTRY';
   g_column_domains('VARCHAR2')(4).col_generator := 'location_random.r_country';
-  g_column_domains('VARCHAR2')(4).col_generator_args := 'r_shortform => true';
-  g_column_domains('VARCHAR2')(5).col_name_hit := 'JOB,TITLE,JOBTITLE,JOB_TITLE';
+  g_column_domains('VARCHAR2')(4).col_generator_args := 'select case when length(''[high]'') <= 2 then ''r_shortform => true'' else ''r_shortform => false'' end from dual';
+  g_column_domains('VARCHAR2')(4).col_args_condition := 1;
+  g_column_domains('VARCHAR2')(5).col_name_hit := 'JOBTITLE,JOB_TITLE';
   g_column_domains('VARCHAR2')(5).col_generator := 'person_random.r_jobtitle';
   g_column_domains('VARCHAR2')(5).col_generator_args := null;
+  g_column_domains('VARCHAR2')(5).col_args_condition := 0;
   g_column_domains('VARCHAR2')(6).col_name_hit := 'LOCATION,LOC,CITY,TOWN';
   g_column_domains('VARCHAR2')(6).col_generator := 'location_random.r_city';
   g_column_domains('VARCHAR2')(6).col_generator_args := null;
+  g_column_domains('VARCHAR2')(6).col_args_condition := 0;
+  g_column_domains('VARCHAR2')(7).col_name_hit := 'STATE,PROVINCE,REGION';
+  g_column_domains('VARCHAR2')(7).col_generator := 'location_random.r_state';
+  g_column_domains('VARCHAR2')(7).col_generator_args := 'select case when length(''[high]'') <= 2 then ''r_shortform => true'' else ''r_shortform => false'' end from dual';
+  g_column_domains('VARCHAR2')(7).col_args_condition := 1;
+  g_column_domains('VARCHAR2')(8).col_name_hit := 'POSTAL_CODE,ZIPCODE,ZIP';
+  g_column_domains('VARCHAR2')(8).col_generator := 'location_random.r_zipcode';
+  g_column_domains('VARCHAR2')(8).col_generator_args := null;
+  g_column_domains('VARCHAR2')(8).col_args_condition := 0;
+  g_column_domains('VARCHAR2')(9).col_name_hit := 'PHONENUMBER,PHONE_NUMBER,PHONENUM,CELL_PHONE,CELLPHONE,CELLNUM';
+  g_column_domains('VARCHAR2')(9).col_generator := 'phone_random.r_phonenumber';
+  g_column_domains('VARCHAR2')(9).col_generator_args := null;
+  g_column_domains('VARCHAR2')(9).col_args_condition := 0;
   -- number
   g_column_domains('NUMBER') := col_domain_tab();
   g_column_domains('NUMBER').extend(2);
