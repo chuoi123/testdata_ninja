@@ -1,4 +1,4 @@
- create or replace package body testdata_generator_domains
+create or replace package body testdata_generator_domains
 
 as
 

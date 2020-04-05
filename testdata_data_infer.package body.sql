@@ -231,13 +231,16 @@ as
                                     max(lag_sample_col_diff)
                                     , min(lag_sample_col_diff)
                                     , round(avg(lag_sample_col_diff))
+                                    , max(has_dec)
                                 from (
                                   select
                                       '|| metadata.table_columns(col_idx).column_name ||'-lag_sample_col lag_sample_col_diff
+                                      , case when rnd_zero = '|| metadata.table_columns(col_idx).column_name ||' then 0 else length(to_char(mod(abs('|| metadata.table_columns(col_idx).column_name ||'), 1))) - 1 end has_dec
                                   from (
                                     select 
                                         '|| metadata.table_columns(col_idx).column_name ||'
                                         , lag('|| metadata.table_columns(col_idx).column_name ||', 1, null) over (order by '|| metadata.table_columns(col_idx).column_name ||') lag_sample_col
+                                        , round('|| metadata.table_columns(col_idx).column_name ||') rnd_zero
                                     from 
                                       '|| metadata.table_name ||' sample ('|| l_sample_count ||')
                                   )
@@ -247,6 +250,7 @@ as
     l_sample_max_diff         number;
     l_sample_min_diff         number;
     l_sample_avg_diff         number;
+    l_sample_has_dec          number;
 
   begin
 
@@ -270,6 +274,8 @@ as
     end loop;
 
     if metadata.table_columns(col_idx).inf_col_generator is null then
+      -- Build data assumptions from sample data
+      execute immediate l_sample_sql into l_sample_max_diff, l_sample_min_diff, l_sample_avg_diff, l_sample_has_dec;
       -- Check for built-ins
       if metadata.table_columns(col_idx).column_assumptions.col_is_unique = 1 then
         -- This is a unqiue number, so make it a builtin type.
@@ -280,7 +286,6 @@ as
         metadata.table_columns(col_idx).inf_builtin_function := 'util_random.ru_number_increment';
         metadata.table_columns(col_idx).inf_builtin_startpoint := util_random.ru_numerify(replace(rpad(' ', length(l_low_val), '#'), ' ', '#'));
         -- Sample increment pattern, and try to construct similar pattern
-        execute immediate l_sample_sql into l_sample_max_diff, l_sample_min_diff, l_sample_avg_diff;
         if l_sample_max_diff = l_sample_min_diff and l_sample_min_diff = l_sample_avg_diff then
           metadata.table_columns(col_idx).inf_builtin_increment := l_sample_min_diff || '¤' || l_sample_max_diff;
         else
@@ -295,8 +300,13 @@ as
         metadata.table_columns(col_idx).inf_col_domain := 'Number';
         metadata.table_columns(col_idx).inf_col_change_pattern := 'Always';
         metadata.table_columns(col_idx).inf_col_type := 'generated';
-        metadata.table_columns(col_idx).inf_col_generator := 'core_random.r_integer';
-        metadata.table_columns(col_idx).inf_col_generator_args := nvl(l_low_val, 4) || ',' || nvl(l_high_val, 10);
+        if l_sample_has_dec > 0 then
+          metadata.table_columns(col_idx).inf_col_generator := 'core_random.r_float';
+          metadata.table_columns(col_idx).inf_col_generator_args := l_sample_has_dec || ',' || nvl(l_low_val, 4) || ',' || nvl(l_high_val, 10);
+        else
+          metadata.table_columns(col_idx).inf_col_generator := 'core_random.r_integer';
+          metadata.table_columns(col_idx).inf_col_generator_args := nvl(l_low_val, 4) || ',' || nvl(l_high_val, 10);
+        end if;
       end if;
     end if;
 

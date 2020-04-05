@@ -119,9 +119,29 @@ as
     l_sample_data         sample_data_tab := sample_data_tab();
     l_sample_data_cursor  sys_refcursor;
     l_sample_size         number;
+    type pattern_histo_tab is table of number index by varchar2(4000);
+    l_pattern_histogram   pattern_histo_tab;
+    l_pattern             varchar2(4000);
+    type pattern_section_rec is record (
+        sec_min_length      number
+        , sec_max_length    number
+        , sec_has_numeric   number
+        , sec_numeric_inc   number
+        , sec_num_start     number
+    );
+    type pattern_section_tab is table of pattern_section_rec;
+    l_pattern_sections    pattern_section_tab := pattern_section_tab();
+    l_section_length      number;
+    l_section_value       varchar2(4000);
+    l_section_int_count   number;
+    l_section_prev_int_p  number;
 
     l_only_one_word       boolean := false;
     l_id_word_pattern     boolean := false;
+    l_caps_count          number;
+    l_low_count           number;
+
+    l_has_pattern         boolean := false;
 
   begin
 
@@ -193,25 +213,133 @@ as
           l_id_word_pattern := true;
         end if;
       end if;
+      -- Pattern related checks
       if l_sample_data(i).patternized is not null then
-        metadata.table_columns(col_idx).inf_col_type := 'generated';
-        metadata.table_columns(col_idx).inf_col_generator := 'util_random.ru_numcharfy';
-        if l_sample_data(i).caps_count > 0 and l_sample_data(i).low_count = 0 then
-          metadata.table_columns(col_idx).inf_col_generator_args := 'ru_string => ''' || l_sample_data(i).patternized || ''', ru_upper => true';
+        l_has_pattern := true;
+        if l_pattern_histogram.exists(l_sample_data(i).patternized) then
+          l_pattern_histogram(l_sample_data(i).patternized) := l_pattern_histogram(l_sample_data(i).patternized) + 1;
         else
-          metadata.table_columns(col_idx).inf_col_generator_args := 'ru_string => ''' || l_sample_data(i).patternized || ''', ru_upper => false';
+          l_pattern_histogram(l_sample_data(i).patternized) := 1;
         end if;
+        -- Pattern section related
+        for y in 1..(l_sample_data(i).seperator_count + 1) loop
+          l_section_value := util_random.ru_extract(l_sample_data(i).patternized, y, l_sample_data(i).seperator_value);
+          l_section_length := length(l_section_value);
+          l_section_int_count := regexp_count(l_section_value, '\d');
+          if l_pattern_sections.exists(y) then
+            if l_section_length < l_pattern_sections(y).sec_min_length then
+              l_pattern_sections(y).sec_min_length := l_section_length;
+            end if;
+            if l_section_length > l_pattern_sections(y).sec_max_length then
+              l_pattern_sections(y).sec_max_length := l_section_length;
+            end if;
+          else
+            l_pattern_sections.extend(1);
+            l_pattern_sections(y).sec_min_length := l_section_length;
+            l_pattern_sections(y).sec_max_length := l_section_length;
+            l_pattern_sections(y).sec_has_numeric := 0;
+            l_pattern_sections(y).sec_numeric_inc := 0;
+            l_pattern_sections(y).sec_num_start := 0;
+          end if;
+          -- Generics
+          if l_sample_data(i).int_count > 0 then
+            l_pattern_sections(y).sec_has_numeric := 1;
+            -- Check if all numeric for this section
+            if l_section_length = l_section_int_count then
+              if to_number(l_section_value) > l_pattern_sections(y).sec_numeric_inc and l_pattern_sections(y).sec_numeric_inc >= 0 then
+                -- Number section is still incrementing.
+                l_pattern_sections(y).sec_numeric_inc := to_number(l_section_value);
+              else
+                l_pattern_sections(y).sec_numeric_inc := -1;
+              end if;
+            else
+              -- We have integers mixed with characters
+              -- Find out if spread out between characters or they are placed sequentially somewhere in string.
+              for x in 1..l_section_int_count loop
+                if l_section_prev_int_p is null then
+                  l_section_prev_int_p := regexp_instr(l_section_value, '\d', 1);
+                else
+                  if regexp_instr(l_section_value, '\d', l_section_prev_int_p + 1) > l_section_prev_int_p + 1 then
+                    -- Number is not sequentially placed in string.
+                    l_pattern_sections(y).sec_numeric_inc := -1;
+                  end if;
+                end if;
+              end loop;
+              -- Here we know if sec_numeric_inc is >= 0 the number is sequentially placed
+              -- and we know that the number is starting at l_section_prev_int_p and is l_section_int_count long.
+              -- Extract and see if the number is increasing.
+              if to_number(substr(l_section_value, l_section_prev_int_p, l_section_int_count)) > l_pattern_sections(y).sec_numeric_inc and l_pattern_sections(y).sec_numeric_inc >= 0 then
+                l_pattern_sections(y).sec_numeric_inc := to_number(substr(l_section_value, l_section_prev_int_p, l_section_int_count));
+              end if;
+              l_section_prev_int_p := null;
+            end if;
+          end if;
+        end loop;
       end if;
     end loop;
 
     close l_sample_data_cursor;
 
+    -- Whatever pattern built up, we can return.
+    if l_has_pattern then
+      -- If count of histograms is 1, we dont have to randomise the input to numcharfy.
+      if l_pattern_histogram.count = 1 then
+        l_pattern := l_pattern_histogram(l_pattern_histogram.first);
+      else
+        -- We have more than one pattern in the fabricated patterns.
+        -- Lets check if we can find some common ground.
+        -- First check if seperated sections are all the same size, if seperated.
+        if l_sample_data(1).seperator_min_count > 0 and l_sample_data(1).seperator_min_count = l_sample_data(1).seperator_max_count then
+          -- Seperated and all samples has same separator count.
+          -- check length of each pattern section
+          for i in 1..l_pattern_sections.count loop
+            if l_pattern_sections(i).sec_min_length = l_pattern_sections(i).sec_max_length then
+              -- This section is always same length
+              if l_pattern_sections(i).sec_has_numeric > 0 and l_pattern_sections(i).sec_numeric_inc > 0 then
+                -- TODO: FIX IF to real. Add increase check
+                -- This section has number(s) and it is increasing, so make sure to do same.
+                -- TODO: Actually replace number wildcards, with incrementor call.
+                l_pattern := l_pattern || l_sample_data(1).seperator_value || util_random.ru_extract(l_sample_data(1).patternized, i, l_sample_data(1).seperator_value);
+              else
+                l_pattern := l_pattern || l_sample_data(1).seperator_value || util_random.ru_extract(l_sample_data(1).patternized, i, l_sample_data(1).seperator_value);
+              end if;
+            else
+              -- This section is variable length
+              if l_pattern_sections(i).sec_has_numeric > 0 and l_pattern_sections(i).sec_numeric_inc > 0 then
+                -- TODO: FIX IF to check if actaully increasing.
+                -- Increasing number
+                -- TODO: Actually replace number wildcards, with incrementor call.
+                l_pattern := l_pattern || l_sample_data(1).seperator_value || ''' || substr(rpad('' '', core_random.r_natural(' || l_pattern_sections(i).sec_min_length ||',' || l_pattern_sections(i).sec_max_length || ') + 1, ''?''), 2) || ''';
+              else
+                l_pattern := l_pattern || l_sample_data(1).seperator_value || ''' || substr(rpad('' '', core_random.r_natural(' || l_pattern_sections(i).sec_min_length ||',' || l_pattern_sections(i).sec_max_length || ') + 1, ''?''), 2) || ''';
+              end if;
+            end if;
+            null;
+          end loop;
+          l_pattern := substr(l_pattern, 2);
+        elsif l_sample_data(1).seperator_min_count > 0 and l_sample_data(1).seperator_min_count != l_sample_data(1).seperator_max_count then
+          -- TODO: This is where we build patterns with different seperator counts.
+          null;
+        else
+          -- This is where we build pattern for strings without seperator
+          l_pattern := ''' || substr(rpad('' '', core_random.r_natural(' || l_sample_data(1).min_count_by_seperator ||',' || l_sample_data(1).max_count_by_seperator || ') + 1, ''?''), 2) || ''';
+        end if;
+      end if;
+      metadata.table_columns(col_idx).inf_col_type := 'generated';
+      metadata.table_columns(col_idx).inf_col_generator := 'util_random.ru_numcharfy';
+      if l_sample_data(1).caps_count > 0 and l_sample_data(1).low_count = 0 then
+        metadata.table_columns(col_idx).inf_col_generator_args := 'ru_string => ''' || l_pattern || ''', ru_upper => true';
+      else
+        metadata.table_columns(col_idx).inf_col_generator_args := 'ru_string => ''' || l_pattern || ''', ru_upper => false';
+      end if;
+    end if;
+
     dbms_application_info.set_action(null);
 
-    exception
+    /*exception
       when others then
         dbms_application_info.set_action(null);
-        raise;
+        raise; */
 
   end guess_pattern_in_col;
 
