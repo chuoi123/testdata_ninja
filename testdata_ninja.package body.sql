@@ -213,17 +213,20 @@ as
 
     dbms_application_info.set_action('parse_generator_cols');
 
-    $if dbms_db_version.ver_le_12 $then
+    $if dbms_db_version.ver_le_12_1 $then
+      yl.log('JSON check not supported. Parsing format as CLASSIC format.');
+      l_column_count := regexp_count(column_metadata, '@') + 1;
+      yl.log('CLASSIC format has '|| l_column_count ||' columns defined.');
+    $else
       select case
         when column_metadata is json then 1
         else 0
       end
       into l_check_for_json
       from dual;
-    $end
 
-    $if dbms_db_version.ver_le_12 $then
       if l_check_for_json = 1 then
+        yl.log('Parsing format as JSON format.');
         -- we have format in json
         execute immediate
           json_parse_stmt
@@ -232,12 +235,13 @@ as
         using column_metadata;
 
         l_column_count := j_result.count;
+        yl.log('JSON format has '|| l_column_count ||' columns defined.');
       else
         -- Format in classic
-         l_column_count := regexp_count(column_metadata, '@') + 1;
+        yl.log('Parsing format as CLASSIC format.');
+        l_column_count := regexp_count(column_metadata, '@') + 1;
+        yl.log('CLASSIC format has '|| l_column_count ||' columns defined.');
       end if;
-    $else
-      l_column_count := regexp_count(column_metadata, '@') + 1;
     $end
 
     -- Sort out interdependecies and column order.
@@ -535,13 +539,25 @@ as
 
   begin
 
-    dbms_application_info.set_action('generator_create');
+    $if $$yl_logger $then
+      yl.set('Testdata Ninja');
+    $end
 
     if generator_table is null and generator_format is not null then
+      $if $$yl_logger $then
+        yl.log('Parsing as format', 'TRACE');
+      $end
       l_generator_columns := parse_generator_cols(generator_format, l_column_order);
     elsif generator_format is null and generator_table is not null then
+      $if $$yl_logger $then
+        yl.log('Parsing as table definition', 'TRACE');
+      $end
       l_generator_columns := parse_cols_from_table(generator_table, generator_table_owner);
     end if;
+
+    $if $$yl_logger $then
+      yl.log('We have ' || to_char(l_generator_columns.count()) || ' columns parsed.', 'TRACE');
+    $end
 
     l_generator_pkg_head := 'create or replace package tdg_'|| generator_name ||'
       authid current_user
@@ -940,7 +956,9 @@ as
 
     execute immediate l_generator_pkg_body;
 
-    dbms_application_info.set_action(null);
+    $if $$yl_logger $then
+      yl.unset;
+    $end
 
     /* exception
       when others then

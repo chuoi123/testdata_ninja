@@ -208,6 +208,7 @@ as
 
     l_classic_field_def       varchar2(4000);
     l_tmp_reference           varchar2(4000);
+    l_ref_table_is_tdg        number := 0;
 
   begin
 
@@ -221,6 +222,12 @@ as
     generator_definition(column_idx).column_type := 'reference field';
     l_tmp_reference := util_random.ru_extract(l_classic_field_def, 3, '#');
     generator_definition(column_idx).reference_table := substr(util_random.ru_extract(l_tmp_reference, 1, '¤'), 2);
+    -- Let us check if we are referencing another testdata package here.
+    -- If we do, some special build rules apply.
+    if instr(upper(generator_definition(column_idx).reference_table), 'TABLE') > 0 and instr(upper(generator_definition(column_idx).reference_table), 'TDG_') > 0 then
+      -- TDG call
+      l_ref_table_is_tdg := 1;
+    end if;
     generator_definition(column_idx).reference_column := util_random.ru_extract(l_tmp_reference, 2, '¤');
     generator_definition(column_idx).ref_dist_type := util_random.ru_extract(l_tmp_reference, 3, '¤');
     if length(util_random.ru_extract(l_tmp_reference, 4, '¤')) != length(l_tmp_reference) then
@@ -250,20 +257,37 @@ as
         l_ref_min_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ' number := substr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', 1, instr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', '','') - 1);
         l_ref_max_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ' number := substr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', instr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', '','') + 1);';
     end if;
-    generator_definition(column_idx).ref_define_code := generator_definition(column_idx).ref_define_code ||'
-      cursor c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(dist_in number) is
-        select ' || generator_definition(column_idx).reference_column || ' as ref_dist_col
-        from (
-          select ' || generator_definition(column_idx).reference_column || '
-          from ' || generator_definition(column_idx).reference_table || '
-          order by dbms_random.value
-        )
-        where rownum <= dist_in;
-    ';
+    if l_ref_table_is_tdg = 1 then
+      generator_definition(column_idx).ref_define_code := generator_definition(column_idx).ref_define_code ||'
+        cursor c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(dist_in number, predict_in varchar2) is
+          select ' || generator_definition(column_idx).reference_column || ' as ref_dist_col
+          from (
+            select ' || generator_definition(column_idx).reference_column || '
+            from ' || substr(generator_definition(column_idx).reference_table, 1, length(generator_definition(column_idx).reference_table) - 1) || '(dist_in, predict_in))
+          );
+      ';
+    else
+      generator_definition(column_idx).ref_define_code := generator_definition(column_idx).ref_define_code ||'
+        cursor c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(dist_in number) is
+          select ' || generator_definition(column_idx).reference_column || ' as ref_dist_col
+          from (
+            select ' || generator_definition(column_idx).reference_column || '
+            from ' || generator_definition(column_idx).reference_table || '
+            order by dbms_random.value
+          )
+          where rownum <= dist_in;
+      ';
+    end if;
     -- Now we build the loading of the reference data code.
-    generator_definition(column_idx).ref_loader_code := '
-      -- Load reference data cursors to lists
-      for i in c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ') loop';
+    if l_ref_table_is_tdg = 1 then
+      generator_definition(column_idx).ref_loader_code := '
+        -- Load reference data cursors to lists
+        for i in c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ', predictable_key) loop';
+    else
+      generator_definition(column_idx).ref_loader_code := '
+        -- Load reference data cursors to lists
+        for i in c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ') loop';
+    end if;
     if generator_definition(column_idx).ref_dist_type = 'simple' then
       generator_definition(column_idx).ref_loader_code := generator_definition(column_idx).ref_loader_code || '
         l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||';
@@ -315,6 +339,8 @@ as
 
   as
 
+      l_ref_table_is_tdg        number := 0;
+
   begin
 
     dbms_application_info.set_action('parse_reference_json');
@@ -322,6 +348,10 @@ as
     -- This is a reference field.
     generator_definition(column_idx).column_type := 'reference field';
     generator_definition(column_idx).reference_table := field_spec(column_idx).j_reference_table;
+    if instr(upper(generator_definition(column_idx).reference_table), 'TABLE') > 0 and instr(upper(generator_definition(column_idx).reference_table), 'TDG_') > 0 then
+      -- TDG call
+      l_ref_table_is_tdg := 1;
+    end if;
     generator_definition(column_idx).reference_column := field_spec(column_idx).j_reference_column;
     generator_definition(column_idx).ref_dist_type := field_spec(column_idx).j_reference_distribution_type;
     if generator_definition(column_idx).ref_dist_type = 'simple' then
@@ -347,20 +377,37 @@ as
         l_ref_min_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ' number := substr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', 1, instr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', '','') - 1);
         l_ref_max_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ' number := substr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', instr(dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||', '','') + 1);';
     end if;
-    generator_definition(column_idx).ref_define_code := generator_definition(column_idx).ref_define_code ||'
-      cursor c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(dist_in number) is
-        select ' || generator_definition(column_idx).reference_column || ' as ref_dist_col
-        from (
-          select ' || generator_definition(column_idx).reference_column || '
-          from ' || generator_definition(column_idx).reference_table || '
-          order by dbms_random.value
-        )
-        where rownum <= dist_in;
-    ';
+    if l_ref_table_is_tdg = 1 then
+      generator_definition(column_idx).ref_define_code := generator_definition(column_idx).ref_define_code ||'
+        cursor c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(dist_in number, predict_in varchar2) is
+          select ' || generator_definition(column_idx).reference_column || ' as ref_dist_col
+          from (
+            select ' || generator_definition(column_idx).reference_column || '
+            from ' || substr(generator_definition(column_idx).reference_table, 1, length(generator_definition(column_idx).reference_table) - 1) || '(dist_in, predict_in))
+          );
+      ';
+    else
+      generator_definition(column_idx).ref_define_code := generator_definition(column_idx).ref_define_code ||'
+        cursor c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(dist_in number) is
+          select ' || generator_definition(column_idx).reference_column || ' as ref_dist_col
+          from (
+            select ' || generator_definition(column_idx).reference_column || '
+            from ' || generator_definition(column_idx).reference_table || '
+            order by dbms_random.value
+          )
+          where rownum <= dist_in;
+      ';
+    end if;
     -- Now we build the loading of the reference data code.
-    generator_definition(column_idx).ref_loader_code := '
-      -- Load reference data cursors to lists
-      for i in c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ') loop';
+    if l_ref_table_is_tdg = 1 then
+      generator_definition(column_idx).ref_loader_code := '
+        -- Load reference data cursors to lists
+        for i in c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ', predictable_key) loop';
+    else
+      generator_definition(column_idx).ref_loader_code := '
+        -- Load reference data cursors to lists
+        for i in c_ref_'|| substr(generator_definition(column_idx).reference_column, 1, 15) ||'(l_ref_distr_' || substr(generator_definition(column_idx).reference_column, 1, 15) || ') loop';
+    end if;
     if generator_definition(column_idx).ref_dist_type = 'simple' then
       generator_definition(column_idx).ref_loader_code := generator_definition(column_idx).ref_loader_code || '
         l_'|| substr(generator_definition(column_idx).reference_column, 1, 15) || '_list(i.ref_dist_col) := dist_'|| substr(generator_definition(column_idx).column_name, 1, 15) ||';
