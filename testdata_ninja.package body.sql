@@ -42,6 +42,10 @@ as
 
     dbms_application_info.set_action('input_tracking');
 
+    -- Reset input tracking references
+    l_output_track := track_output_tab();
+    l_output_order_track := track_output_ord_tab();
+
     for i in 1..col_count loop
       columns_all_sorted.extend(1);
       columns_all_sorted(columns_all_sorted.count) := i;
@@ -174,7 +178,10 @@ as
         , jt.distribution_range_start
         , jt.distribution_range_end
         , jt.distribution_weighted
-        , jt.reference_static_list
+        , jt.reflist_static_list
+        , jt.reflist_dyn_table_name
+        , jt.reflist_dyn_column_name
+        , jt.reflist_dyn_size
         , jt.generator
         , jt.nullable
         , jt.arguments
@@ -201,7 +208,10 @@ as
                 , distribution_range_start varchar2(250) path ''$.distribution_range_start''
                 , distribution_range_end varchar2(250) path ''$.distribution_range_end''
                 , distribution_weighted varchar2(250) format json path ''$.distribution_weighted''
-                , reference_static_list varchar2(250) path ''$.reference_static_list''
+                , reflist_static_list varchar2(250) path ''$.reference_static_list''
+                , reflist_dyn_table_name varchar2(250) path ''$.reflist_dyn_table_name''
+                , reflist_dyn_column_name varchar2(250) path ''$.reflist_dyn_column_name''
+                , reflist_dyn_size varchar2(250) path ''$.reflist_dyn_size''
                 , generator varchar2(250) path ''$.generator''
                 , nullable varchar2(250) path ''$.nullable''
                 , arguments varchar2(250) path ''$.arguments''
@@ -862,8 +872,8 @@ as
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_define_code;
       elsif l_generator_columns(i).column_type = 'builtin' then
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
-      elsif l_generator_columns(i).column_type = 'referencelist' and l_generator_columns(i).builtin_define_code is not null then
-        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
+      elsif l_generator_columns(i).column_type = 'referencelist' and l_generator_columns(i).ref_define_code is not null then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_define_code;
       elsif l_generator_columns(i).column_type = 'generated' and l_generator_columns(i).column_rule = 'U' then
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).builtin_define_code;
       end if;
@@ -885,6 +895,8 @@ as
 
     for i in 1..l_generator_columns.count loop
       if l_generator_columns(i).column_type = 'reference field' then
+        l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_loader_code;
+      elsif l_generator_columns(i).column_type = 'referencelist' then
         l_generator_pkg_body := l_generator_pkg_body || l_generator_columns(i).ref_loader_code;
       end if;
     end loop;
@@ -911,7 +923,7 @@ as
       elsif l_generator_columns(l_build_idx).column_type = 'builtin' then
         l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := l_bltin_' || l_generator_columns(l_build_idx).column_name || ';' || l_generator_columns(l_build_idx).builtin_logic_code;
       elsif l_generator_columns(l_build_idx).column_type = 'referencelist' then
-        if l_generator_columns(l_build_idx).builtin_define_code is null then
+        if l_generator_columns(l_build_idx).ref_define_code is null then
           l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(''' || l_generator_columns(l_build_idx).fixed_value || ''');';
         else
           l_row_stmt := 'l_ret_var.' || l_generator_columns(l_build_idx).column_name || ' := util_random.ru_pickone(l_bltin_' || l_generator_columns(l_build_idx).column_name || ');';

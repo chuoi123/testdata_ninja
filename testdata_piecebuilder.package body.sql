@@ -460,6 +460,10 @@ as
   as
 
     l_classic_field_def       varchar2(4000);
+    l_dynamic_def             varchar2(4000);
+    l_dynamic_column_name     varchar2(4000);
+    l_dynamic_table_name      varchar2(4000);
+    l_dynamic_row_count       varchar2(4000);
 
   begin
 
@@ -476,7 +480,16 @@ as
       generator_definition(column_idx).fixed_value := substr(generator_definition(column_idx).fixed_value, 1, length(generator_definition(column_idx).fixed_value) - 1);
     else
       -- Generate the list at runtime. Define the code to do so.
-      null;
+      -- We expect the definition to come in 3 fields
+      l_dynamic_def := substr(util_random.ru_extract(l_classic_field_def, 3, '#'), 2);
+      l_dynamic_column_name := util_random.ru_extract(l_dynamic_def, 2, '~');
+      l_dynamic_table_name := util_random.ru_extract(l_dynamic_def, 1, '~');
+      l_dynamic_row_count := util_random.ru_extract(l_dynamic_def, 3, '~');
+      generator_definition(column_idx).ref_define_code := 'l_bltin_' || generator_definition(column_idx).column_name || ' varchar2(32000);';
+      generator_definition(column_idx).ref_loader_code := '
+      select listagg(' || l_dynamic_column_name || ', '','') within group (order by ' || l_dynamic_column_name || ') 
+      into l_bltin_' || generator_definition(column_idx).column_name || ' 
+      from (select ' || l_dynamic_column_name || ' from (select ' || l_dynamic_column_name || ' from ' || l_dynamic_table_name || ' order by dbms_random.value) where rownum <= ' || l_dynamic_row_count || ');' ;
     end if;
 
     dbms_application_info.set_action(null);
@@ -496,17 +509,28 @@ as
 
   as
 
+    l_dynamic_column_name     varchar2(4000);
+    l_dynamic_table_name      varchar2(4000);
+    l_dynamic_row_count       varchar2(4000);
+
   begin
 
     dbms_application_info.set_action('parse_referencelist_json');
 
     generator_definition(column_idx).column_type := 'referencelist';
-    if instr(field_spec(column_idx).j_reference_static_list, ',') > 0 then
+    if instr(field_spec(column_idx).j_reflist_static_list, ',') > 0 then
       -- Fixed list. Set referencelist values to string.
-      generator_definition(column_idx).fixed_value := field_spec(column_idx).j_reference_static_list;
+      generator_definition(column_idx).fixed_value := field_spec(column_idx).j_reflist_static_list;
     else
       -- Generate the list at runtime. Define the code to do so.
-      null;
+      l_dynamic_column_name := field_spec(column_idx).j_reflist_dyn_column_name;
+      l_dynamic_table_name := field_spec(column_idx).j_reflist_dyn_table_name;
+      l_dynamic_row_count := field_spec(column_idx).j_reflist_dyn_size;
+      generator_definition(column_idx).ref_define_code := 'l_bltin_' || generator_definition(column_idx).column_name || ' varchar2(32000);';
+      generator_definition(column_idx).ref_loader_code := '
+      select listagg(' || l_dynamic_column_name || ', '','') within group (order by ' || l_dynamic_column_name || ') 
+      into l_bltin_' || generator_definition(column_idx).column_name || ' 
+      from (select ' || l_dynamic_column_name || ' from (select ' || l_dynamic_column_name || ' from ' || l_dynamic_table_name || ' order by dbms_random.value) where rownum <= ' || l_dynamic_row_count || ');' ;
     end if;
 
     dbms_application_info.set_action(null);
